@@ -1,22 +1,40 @@
 import { useState, FormEvent, useEffect } from "react";
 import { IconNote, IconExclamationCircle, IconInfoCircle, IconSend2, IconBubble, IconKeyboard, IconPointer, IconCamera } from "@tabler/icons-react";
+import CodeBlock from "./components/CodeBlock";
+
+
+const appleScriptCode = `
+tell application "Finder"
+    activate
+    display dialog "Hello from AppleScript!"
+end tell
+`;
+
 
 const iconMap = {
-  task: <IconNote />,
-  thinking: <IconBubble />,
-  info: <IconInfoCircle />,
-  error: <IconExclamationCircle />,
-  typing: <IconKeyboard />,
-  click: <IconPointer />,
-  screenshot: <IconCamera />
+  task: IconNote,
+  thinking: IconBubble,
+  info: IconInfoCircle,
+  error: IconExclamationCircle,
+  typing: IconKeyboard,
+  click: IconPointer,
+  screenshot: IconCamera
+} 
+
+type iconType = keyof typeof iconMap;
+
+type message = {
+  type: string,
+  message: string
 }
+
 const App = () => {
   const [prompt, setPrompt] = useState("");
   const [sent, setSent] = useState<string[]>([]);
-  const [messages, setMessages] = useState<string[]>([]);
+  const [messages, setMessages] = useState<message[]>([]);
 
   useEffect(() => {
-    window.ipcRenderer.onReply((data) => {
+    window.ipcRenderer.on("reply", (_, data: message) => {
       setMessages((prev) => [...prev, data]);
     });
   }, []);
@@ -41,23 +59,33 @@ const App = () => {
         </div>
         <div className="bg-bg-2 px-6 py-4 rounded-md flex flex-col gap-2 my-4">
           <div className="flex gap-2">
-            <IconNote stroke={1.5} />
-            <strong>Task</strong>
-          </div>
-          <p className="text-white/65">Using Google Flights, find me a one way, non-stop flight from San Francisco to Tokyo departing two weeks from now.</p>
-        </div>
-        <div className="bg-bg-2 px-6 py-4 rounded-md flex flex-col gap-2 my-4">
-          <div className="flex gap-2">
             <IconBubble stroke={1.5} />
             <strong>Thinking</strong>
           </div>
           <p className="text-white/65">The user wants me to find a one-way, non-stop flight from San Francisco to Tokyo departing two weeks from now using Google Flights. Let me break this down:</p>
         </div>
-        {messages.map((msg, i) => (
-          <div key={i}>{msg}</div>
-        ))}
+
+
+        {messages.map(({ type, message }, i) => {
+          if (!(type in iconMap)) type = 'info'
+
+          const Icon = iconMap[type as iconType]
+
+          return (
+            <div key={i} className="bg-bg-2 px-6 py-4 rounded-md flex flex-col gap-2 my-4">
+              <div className="flex gap-2">
+                <Icon stroke={1.5} />
+                <strong>Task</strong>
+              </div>
+              <p className="text-white/65">{message}</p>
+            </div>
+          )
+        })}
         {messages.length == 0 && <br />}
       </div>
+
+      <CodeBlock code={appleScriptCode} />
+
       <h1 className="font-[Comorant_Garamond] font-serif text-2xl mb-4 text-tx">
         What do you want to run today?
       </h1>
