@@ -39,6 +39,7 @@ function createWindow() {
         width: 500,
         height: 180,
         resizable: false,
+        trafficLightPosition: { x: -100, y: -100 },
         ...(process.platform === "darwin"
             ? {
                   autoHideMenuBar: true,

@@ -20,7 +20,7 @@ const App = () => {
   };
 
   return (
-    <div className="flex flex-col h-screen bg-bg text-tx p-8 pt-12 bg-2">
+    <div className="flex flex-col h-screen bg-bg text-tx p-8 pt-4 bg-2">
       <div className="flex-grow">
         {messages.map((msg, i) => (
           <div key={i}>{msg}</div>
