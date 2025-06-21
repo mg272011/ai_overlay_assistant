@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { run } from "@openai/agents";
 import { stepsAgent } from "./ai.ts";
 import path from "node:path";
+import { exec } from "node:child_process";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -96,6 +97,21 @@ ipcMain.on("message", async (event, msg) => {
   const stepsString = stepsOutput?.output;
   const steps = stepsString.split("\n");
   console.log(steps);
+
+  for (const step of steps) {
+    if (step) {
+      exec(`osascript -e '${step}'`, (error, stdout, stderr) => {
+        if (error) {
+          console.error(`exec error: ${error}`);
+          return;
+        }
+        if (stderr) {
+          console.error(`stderr: ${stderr}`);
+        }
+        console.log(stdout);
+      });
+    }
+  }
 
   event.sender.send("reply", "Received: " + msg);
 });

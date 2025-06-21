@@ -10,9 +10,12 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@openai/agents": "^0.0.9",
+    "@tailwindcss/vite": "^4.1.10",
     "dotenv": "^16.5.0",
     "react": "^18.2.0",
-    "react-dom": "^18.2.0"
+    "react-dom": "^18.2.0",
+    "tailwindcss": "^4.1.10"
   },
   "devDependencies": {
     "@types/react": "^18.2.64",
