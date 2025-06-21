@@ -23,7 +23,7 @@ contextBridge.exposeInMainWorld("ipcRenderer", {
 
   sendMessage: (msg: string) => ipcRenderer.send("message", msg),
   onReply: (callback: (data: string) => void) =>
-    ipcRenderer.on("reply", (_, data) => callback(data))
+    ipcRenderer.on("reply", (_, data) => callback(data)),
 
   // You can expose other APTs you need here.
   // ...

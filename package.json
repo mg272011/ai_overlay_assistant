@@ -14,6 +14,7 @@
     "@tabler/icons-react": "^3.34.0",
     "@tailwindcss/vite": "^4.1.10",
     "dotenv": "^16.5.0",
+    "jimp": "^1.6.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "tailwindcss": "^4.1.10"

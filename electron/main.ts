@@ -1,12 +1,5 @@
 import "dotenv/config";
-import {
-  app,
-  BrowserWindow,
-  ipcMain,
-  desktopCapturer,
-  screen,
-  Notification
-} from "electron";
+import { app, BrowserWindow, ipcMain, screen, Notification } from "electron";
 import { fileURLToPath } from "node:url";
 import { run } from "@openai/agents";
 import { stepsAgent, scriptsAgent } from "./ai.ts";
@@ -14,6 +7,7 @@ import path from "node:path";
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
 import fs, { writeFile } from "fs";
+import { Jimp } from "jimp";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -48,18 +42,18 @@ function createWindow() {
     height: 198,
     resizable: false,
     trafficLightPosition: { x: -100, y: -100 },
-    alwaysOnTop: true,
+    // alwaysOnTop: true,
     ...(process.platform === "darwin"
       ? {
           autoHideMenuBar: true,
           titleBarStyle: "hiddenInset",
-          frame: false
+          frame: false,
         }
       : {}),
     webPreferences: {
       contextIsolation: true,
-      preload: path.join(__dirname, "preload.mjs")
-    }
+      preload: path.join(__dirname, "preload.mjs"),
+    },
   });
   win.webContents.openDevTools({ mode: "detach" });
 
@@ -99,14 +93,9 @@ app.whenReady().then(createWindow);
 ipcMain.on("message", async (event, msg) => {
   console.log("Got message:", msg);
   win?.setSize(500, 500);
-  console.log("taking screenshot");
   const primaryDisplay = screen.getPrimaryDisplay();
   const { width, height } = primaryDisplay.workAreaSize;
-  let sources = await desktopCapturer.getSources({
-    types: ["screen"],
-    thumbnailSize: { width, height }
-  });
-  let img = sources[0].thumbnail.toDataURL();
+  console.log(width, height);
   console.log("getting steps");
 
   const folderName = `screenshots/${Date.now()}-${msg.replaceAll(" ", "-")}`;
@@ -120,39 +109,70 @@ ipcMain.on("message", async (event, msg) => {
     console.error(err);
   }
 
-  const stepsOutput = (
-    await run(stepsAgent, [
-      {
-        role: "user",
-        content: [
-          { type: "input_text", text: msg },
-          { type: "input_image", image: img }
-        ]
+  let stepHistory = "";
+  while (true) {
+    console.log("taking screenshot");
+
+    // const tmpPath = path.join(os.tmpdir(), "temp_screenshot.png");
+    const tmpPath = path.join(__dirname, `${Date.now}-screenshot.png`);
+
+    await execPromise(`screencapture -C -x "${tmpPath}"`);
+    const image = await Jimp.read(tmpPath);
+    image.resize({ w: width, h: height });
+    console.log(image.width, image.height);
+
+    const dotColor = 0x00ff00ff; // red with full alpha
+    const radius = 5;
+
+    for (let y = 0; y < image.bitmap.height; y += 100) {
+      for (let x = 0; x < image.bitmap.width; x += 100) {
+        for (let dy = -radius; dy <= radius; dy++) {
+          for (let dx = -radius; dx <= radius; dx++) {
+            const dist = dx * dx + dy * dy;
+            if (dist <= radius * radius) {
+              image.setPixelColor(dotColor, x + dx, y + dy);
+            }
+          }
+        }
       }
-    ])
-  ).state._currentStep;
-  new Notification({ title: "Now running", body: msg }).show();
-  console.log(stepsOutput);
-  if (stepsOutput?.type != "next_step_final_output") return;
+    }
 
-  const stepsString = stepsOutput?.output;
-  const steps: string[] = stepsString.split("\n").filter((s) => s);
-  console.log(steps);
-
-  for (const step of steps) {
-    new Notification({ title: "Running Step", body: step }).show();
-
-    console.log(`${Date.now()} - ${step}`);
-    sources = await desktopCapturer.getSources({
-      types: ["screen"],
-      thumbnailSize: { width, height }
+    const img = await image.getBase64("image/png");
+    fs.unlink(tmpPath, (err) => {
+      if (err) console.error(err);
     });
-    img = sources[0].thumbnail.toDataURL();
+
+    const stepsOutput = (
+      await run(stepsAgent, [
+        {
+          role: "user",
+          content: [
+            {
+              type: "input_text",
+              text: `Initial task request: ${msg}
+
+  All previous steps taken so far:
+  ${stepHistory}
+  `,
+            },
+            { type: "input_image", image: img },
+          ],
+        },
+      ])
+    ).state._currentStep;
+    console.log(stepsOutput);
+    if (stepsOutput?.type != "next_step_final_output") return;
+    const stepString = stepsOutput?.output;
+    stepHistory += "\n" + stepString;
+    if (stepString == "stop") break;
+    new Notification({ title: "Running Step", body: stepString }).show();
+
+    console.log(`${Date.now()} - ${stepString}`);
 
     const base64Data = img.replace(/^data:image\/png;base64,/, "");
 
-    await writeFile(
-      `${folderName}/${Date.now()}-${step
+    writeFile(
+      `${folderName}/${Date.now()}-${stepString
         .replaceAll(" ", "-")
         .replaceAll(",", "")
         .replaceAll("/", "")}.png`,
@@ -169,24 +189,30 @@ ipcMain.on("message", async (event, msg) => {
         {
           role: "user",
           content: [
-            { type: "input_text", text: step },
-            { type: "input_image", image: img }
-          ]
-        }
+            {
+              type: "input_text",
+              text: `Instruction to execute: ${stepString}
+
+Dimensions of window: ${width}x${height}`,
+            },
+            { type: "input_image", image: img },
+          ],
+        },
       ])
     ).state._currentStep;
     if (scriptOutput?.type != "next_step_final_output") continue;
-    const script = scriptOutput?.output;
+    let script = scriptOutput?.output;
 
     if (script) {
+      script = script.replaceAll("```applescript", "").replaceAll("```", "");
       try {
         // const scriptWithEscapedQuotes = script.replace(/"/g, '\\"');
         console.log(script);
-        await writeFile("../temp/script.scpt", script, (err) => {
+        writeFile("./temp/script.scpt", script, (err) => {
           if (err) console.error(err);
         });
         const { stdout, stderr } = await execPromise(
-          `osascript ../temp/script.scpt`
+          `osascript ./temp/script.scpt`
         );
         if (stderr) {
           console.error(`stderr: ${stderr}`);
