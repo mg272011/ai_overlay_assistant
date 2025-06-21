@@ -37,7 +37,7 @@ function createWindow() {
     win = new BrowserWindow({
         icon: path.join(process.env.VITE_PUBLIC, "electron-vite.svg"),
         width: 500,
-        height: 100,
+        height: 180,
         resizable: false,
         ...(process.platform === "darwin"
             ? {
