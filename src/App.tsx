@@ -15,7 +15,7 @@ const App = () => {
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
     window.ipcRenderer.sendMessage(prompt);
-    setSent(...sent, prompt);
+    setSent([...sent, prompt]);
     setPrompt("");
   };
 
@@ -26,9 +26,11 @@ const App = () => {
           <div key={i}>{msg}</div>
         ))}
       </div>
-      <h1 className="font-[Comorant_Garamond] font-serif text-2xl mb-4 text-tx">What do you want to run today?</h1>
+      <h1 className="font-[Comorant_Garamond] font-serif text-2xl mb-4 text-tx">
+        What do you want to run today?
+      </h1>
       <form className="w-full relative" onSubmit={handleSubmit}>
-        <textarea
+        <input
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
           placeholder="Enter your prompt..."
