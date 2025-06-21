@@ -1,5 +1,24 @@
 @import "tailwindcss";
 
+@theme {
+  --color-bg: rgb(16, 15, 15);
+  --color-bg-2: rgb(28, 27, 26);
+  --color-ui: rgb(40, 39, 38);
+  --color-ui-2: rgb(52, 51, 49);
+  --color-ui-3: rgb(64, 62, 60);
+  --color-tx-3: rgb(87, 86, 83);
+  --color-tx-2: rgb(135, 133, 128);
+  --color-tx: rgb(206, 205, 195);
+  --color-re: rgb(209, 77, 65);
+  --color-or: rgb(218, 112, 44);
+  --color-ye: rgb(208, 162, 21);
+  --color-gr: rgb(135, 154, 57);
+  --color-cy: rgb(58, 169, 159);
+  --color-bl: rgb(67, 133, 190);
+  --color-pu: rgb(139, 126, 200);
+  --color-ma: rgb(206, 93, 151);
+}
+
 :root {
   font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
 

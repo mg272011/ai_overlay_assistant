@@ -1,9 +1,10 @@
+import "dotenv/config";
 import { app, BrowserWindow, ipcMain } from "electron";
-import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
+import { run } from "@openai/agents";
+import { stepsAgent } from "./ai.ts";
 import path from "node:path";
 
-const require = createRequire(import.meta.url);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // The built directory structure
@@ -32,7 +33,7 @@ function createWindow() {
   win = new BrowserWindow({
     icon: path.join(process.env.VITE_PUBLIC, "electron-vite.svg"),
     width: 500,
-    height: 200,
+    height: 100,
     resizable: false,
     ...(process.platform === "darwin"
       ? {
@@ -81,7 +82,20 @@ app.on("activate", () => {
 
 app.whenReady().then(createWindow);
 
-ipcMain.on("message", (event, msg) => {
+ipcMain.on("message", async (event, msg) => {
   console.log("Got message:", msg);
+  win?.setSize(500, 500);
+
+  const stepsOutput = (
+    await run(stepsAgent, [
+      { type: "reasoning", content: [{ type: "input_text", text: msg }] }
+    ])
+  ).state._currentStep;
+  if (stepsOutput?.type != "next_step_final_output") return;
+
+  const stepsString = stepsOutput?.output;
+  const steps = stepsString.split("\n");
+  console.log(steps);
+
   event.sender.send("reply", "Received: " + msg);
 });
