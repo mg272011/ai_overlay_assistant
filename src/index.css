@@ -19,8 +19,17 @@
   --color-ma: rgb(206, 93, 151);
 }
 
+@font-face {
+  font-family: 'Satoshi';
+  src: url('./fonts/Satoshi/Satoshi-Regular.woff') format('woff'),
+        url('./fonts/Satoshi/Satoshi-Bold.woff') format('woff');
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap; /* Improves performance by displaying fallback text while the font loads */
+}
+
 :root {
-  font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
+  font-family: Satoshi;
 
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -31,3 +40,4 @@
 body {
   margin: 0;
 }
+
