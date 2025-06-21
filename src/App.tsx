@@ -1,6 +1,15 @@
 import { useState, FormEvent, useEffect } from "react";
-import { IconSend2 } from "@tabler/icons-react";
+import { IconNote, IconExclamationCircle, IconInfoCircle, IconSend2, IconBubble, IconKeyboard, IconPointer, IconCamera } from "@tabler/icons-react";
 
+const iconMap = {
+  task: <IconNote />,
+  thinking: <IconBubble />,
+  info: <IconInfoCircle />,
+  error: <IconExclamationCircle />,
+  typing: <IconKeyboard />,
+  click: <IconPointer />,
+  screenshot: <IconCamera />
+}
 const App = () => {
   const [prompt, setPrompt] = useState("");
   const [sent, setSent] = useState<string[]>([]);
@@ -20,11 +29,34 @@ const App = () => {
   };
 
   return (
-    <div className="flex flex-col h-screen bg-bg text-tx p-8 pt-4 bg-2">
+    <div className="flex flex-col bg-bg text-tx p-8 pt-4 bg-2">
       <div className="flex-grow">
+        <div className="bg-bl/15 ring-1 ring-bl/50 px-6 py-3 rounded-md flex gap-2 text-bl my-4">
+          <IconInfoCircle stroke={1.5} />
+          <p><strong>Info</strong> - a system message has appeared!</p>
+        </div>
+        <div className="bg-re/15 ring-1 ring-re/50 px-6 py-3 rounded-md flex gap-2 text-re/90 my-4">
+          <IconExclamationCircle stroke={1.5} />
+          <p><strong>Error</strong> - something went wrong...!</p>
+        </div>
+        <div className="bg-bg-2 px-6 py-4 rounded-md flex flex-col gap-2 my-4">
+          <div className="flex gap-2">
+            <IconNote stroke={1.5} />
+            <strong>Task</strong>
+          </div>
+          <p className="text-white/65">Using Google Flights, find me a one way, non-stop flight from San Francisco to Tokyo departing two weeks from now.</p>
+        </div>
+        <div className="bg-bg-2 px-6 py-4 rounded-md flex flex-col gap-2 my-4">
+          <div className="flex gap-2">
+            <IconBubble stroke={1.5} />
+            <strong>Thinking</strong>
+          </div>
+          <p className="text-white/65">The user wants me to find a one-way, non-stop flight from San Francisco to Tokyo departing two weeks from now using Google Flights. Let me break this down:</p>
+        </div>
         {messages.map((msg, i) => (
           <div key={i}>{msg}</div>
         ))}
+        {messages.length == 0 && <br />}
       </div>
       <h1 className="font-[Comorant_Garamond] font-serif text-2xl mb-4 text-tx">
         What do you want to run today?
