@@ -1,12 +1,15 @@
 import "dotenv/config";
-import { app, BrowserWindow, ipcMain } from "electron";
+import { app, BrowserWindow, ipcMain, desktopCapturer, screen } from "electron";
 import { fileURLToPath } from "node:url";
 import { run } from "@openai/agents";
-import { stepsAgent } from "./ai.ts";
+import { stepsAgent, scriptsAgent } from "./ai.ts";
 import path from "node:path";
 import { exec } from "node:child_process";
+import { promisify } from "node:util";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+const execPromise = promisify(exec);
 
 // The built directory structure
 //
@@ -86,30 +89,45 @@ app.whenReady().then(createWindow);
 ipcMain.on("message", async (event, msg) => {
   console.log("Got message:", msg);
   win?.setSize(500, 500);
+  // const primaryDisplay = screen.getPrimaryDisplay();
+  // const { width, height } = primaryDisplay.workAreaSize;
+  // const sources = await desktopCapturer.getSources({
+  //   types: ["screen"],
+  //   thumbnailSize: { width, height }
+  // });
+  // const img = sources[0].thumbnail.toDataURL();
 
-  const stepsOutput = (
-    await run(stepsAgent, [
-      { type: "reasoning", content: [{ type: "input_text", text: msg }] }
-    ])
-  ).state._currentStep;
+  const stepsOutput = (await run(stepsAgent, msg)).state._currentStep;
+  console.log(stepsOutput);
   if (stepsOutput?.type != "next_step_final_output") return;
 
   const stepsString = stepsOutput?.output;
-  const steps = stepsString.split("\n");
+  const steps = stepsString.split("\n").filter((s) => s);
   console.log(steps);
 
   for (const step of steps) {
-    if (step) {
-      exec(`osascript -e '${step}'`, (error, stdout, stderr) => {
-        if (error) {
-          console.error(`exec error: ${error}`);
-          return;
-        }
+    const scriptOutput = (await run(scriptsAgent, step)).state._currentStep;
+    if (scriptOutput?.type != "next_step_final_output") continue;
+    const script = scriptOutput?.output;
+
+    if (script) {
+      try {
+        const scriptWithEscapedQuotes = script.replace(/"/g, '\\"');
+        console.log(
+          `osascript -e "${scriptWithEscapedQuotes.replace("\n", '" -e "')}"`
+        );
+        const { stdout, stderr } = await execPromise(
+          `osascript -e "${scriptWithEscapedQuotes.replace("\n", '" -e "')}"`
+        );
         if (stderr) {
           console.error(`stderr: ${stderr}`);
         }
-        console.log(stdout);
-      });
+        if (stdout) {
+          console.log(stdout);
+        }
+      } catch (e) {
+        console.error("error executing script: ", e);
+      }
     }
   }
 
