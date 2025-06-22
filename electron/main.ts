@@ -281,9 +281,13 @@ ipcMain.on("message", async (event, msg) => {
         title: "Task complete",
         body: stepString.replace(" STOP", ""),
       }).show();
+      event.sender.send("reply", { type: 'info', message: stepString.replace(" STOP", "")});
+
       break;
     }
     new Notification({ title: "Running Step", body: stepString }).show();
+    event.sender.send("reply", { type: 'info', message: stepString });
+
 
     const clickMatch = stepString.match(/^Click element (\d+)$/i);
     if (clickMatch) {
@@ -393,6 +397,4 @@ ${
     await new Promise((resolve) => setTimeout(resolve, 250));
     console.timeEnd("while-loop-iteration");
   }
-
-  event.sender.send("reply", "Received: " + msg);
 });
