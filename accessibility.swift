@@ -1,0 +1,257 @@
+#!/usr/bin/swift
+import ApplicationServices
+import Cocoa
+import CoreFoundation
+
+struct DebugDebouncer {
+  static var hasPrintedAttributes = false
+}
+
+// Helper function to safely get string attribute
+func getStringAttribute(from element: AXUIElement, attribute: String) -> String? {
+  var value: CFTypeRef?
+  let result = AXUIElementCopyAttributeValue(element, attribute as CFString, &value)
+
+  if result == .success {
+    return value as? String
+  }
+  return nil
+}
+
+// Helper function to safely get array attribute
+func getArrayAttribute(from element: AXUIElement, attribute: String) -> [AXUIElement]? {
+  var value: CFTypeRef?
+  let result = AXUIElementCopyAttributeValue(element, attribute as CFString, &value)
+
+  if result == .success {
+    return value as? [AXUIElement]
+  }
+  return nil
+}
+
+// Helper function to get position
+func getPosition(from element: AXUIElement) -> CGPoint? {
+  var value: CFTypeRef?
+  let result = AXUIElementCopyAttributeValue(element, "AXPosition" as CFString, &value)
+
+  if result == .success, let axValue = value {
+    var point = CGPoint.zero
+    if AXValueGetValue(axValue as! AXValue, .cgPoint, &point) {
+      return point
+    }
+  }
+  return nil
+}
+
+// Helper function to get size
+func getSize(from element: AXUIElement) -> CGSize? {
+  var value: CFTypeRef?
+  let result = AXUIElementCopyAttributeValue(element, "AXSize" as CFString, &value)
+
+  if result == .success, let axValue = value {
+    var size = CGSize.zero
+    if AXValueGetValue(axValue as! AXValue, .cgSize, &size) {
+      return size
+    }
+  }
+  return nil
+}
+
+print("Chrome Accessibility Scanner")
+print("============================")
+
+// Check if accessibility is enabled
+let trusted = AXIsProcessTrusted()
+print("Accessibility trusted: \(trusted)")
+
+if !trusted {
+  print("❌ Accessibility not enabled.")
+  print("Go to: System Preferences > Security & Privacy > Privacy > Accessibility")
+  print("Add Terminal and make sure it's checked.")
+  exit(1)
+}
+
+// Get running applications via NSWorkspace
+let runningApps = NSWorkspace.shared.runningApplications
+print("✅ Found \(runningApps.count) running applications")
+
+// Find Chrome
+var chromeApp: AXUIElement?
+print("\nLooking for Chrome...")
+for app in runningApps {
+  if let name = app.localizedName, name.lowercased().contains("chrome") {
+    chromeApp = AXUIElementCreateApplication(app.processIdentifier)
+    print("✅ Found Chrome: \(name)")
+    break
+  }
+}
+
+guard let chrome = chromeApp else {
+  print("❌ Chrome not found. Available apps:")
+  for app in runningApps.prefix(10) {
+    if let name = app.localizedName {
+      print("  - \(name)")
+    }
+  }
+  print("\nMake sure Google Chrome is running and try again.")
+  exit(1)
+}
+
+// Get Chrome windows
+guard let windows = getArrayAttribute(from: chrome, attribute: "AXWindows") else {
+  print("❌ Could not get Chrome windows")
+  exit(1)
+}
+
+print("🔍 Scanning \(windows.count) Chrome window(s)...")
+
+func isClickableRole(_ role: String) -> Bool {
+  let clickableRoles = [
+    "AXButton",
+    "AXLink",
+    "AXTextField",
+    "AXTextArea",
+    "AXCheckBox",
+    "AXRadioButton",
+    "AXPopUpButton",
+    "AXComboBox",
+    "AXTab",
+    "AXMenuItem",
+    "AXImage",
+    "AXCell",
+    "AXSearchField",
+    "AXStaticText",  // Sometimes clickable in web pages
+  ]
+
+  return clickableRoles.contains(role)
+}
+
+struct ClickableElement {
+  let element: AXUIElement
+  let role: String
+  let title: String
+  let position: CGPoint?
+  let size: CGSize?
+}
+
+func scanElement(_ element: AXUIElement, depth: Int = 0) -> [ClickableElement] {
+  guard depth < 25 else { return [] }  // Prevent infinite recursion
+
+  var results: [ClickableElement] = []
+
+  // Get role
+  guard let role = getStringAttribute(from: element, attribute: "AXRole") else {
+    return results
+  }
+
+  // Check if clickable
+  if isClickableRole(role) {
+    var title = getStringAttribute(from: element, attribute: "AXTitle") ?? ""
+    if title.isEmpty {
+      title =
+        getStringAttribute(from: element, attribute: "AXDescription")
+        ?? getStringAttribute(from: element, attribute: "AXValue")
+        ?? getStringAttribute(from: element, attribute: "AXHelp") ?? ""
+    }
+
+    // Only include elements with useful info or good positions
+    let position = getPosition(from: element)
+    let size = getSize(from: element)
+
+    // Filter out tiny or obviously non-interactive elements
+    var shouldInclude = true
+    if let sz = size, sz.width < 5 || sz.height < 5 {
+      shouldInclude = false
+    }
+
+    if shouldInclude {
+      results.append(
+        ClickableElement(
+          element: element,
+          role: role,
+          title: title.isEmpty ? "(no text)" : title,
+          position: position,
+          size: size
+        ))
+    }
+  }
+
+  // Scan children
+  if let children = getArrayAttribute(from: element, attribute: "AXChildren") {
+    for child in children {
+      results.append(contentsOf: scanElement(child, depth: depth + 1))
+    }
+  }
+
+  return results
+}
+
+var allElements: [ClickableElement] = []
+
+for (index, window) in windows.enumerated() {
+  print("Scanning window \(index + 1)...")
+  let elements = scanElement(window)
+  allElements.append(contentsOf: elements)
+  print("  Found \(elements.count) clickable elements")
+}
+
+// Remove duplicates based on position and title
+var uniqueElements: [ClickableElement] = []
+for element in allElements {
+  let isDuplicate = uniqueElements.contains { existing in
+    existing.title == element.title && existing.position?.x == element.position?.x
+      && existing.position?.y == element.position?.y
+  }
+
+  if !isDuplicate {
+    uniqueElements.append(element)
+  }
+}
+
+if CommandLine.arguments.count > 1, let numberToClick = Int(CommandLine.arguments[1]) {
+  guard numberToClick > 0, numberToClick <= uniqueElements.count else {
+    print("❌ Invalid number. Please provide a number between 1 and \(uniqueElements.count).")
+    exit(1)
+  }
+
+  let elementToClick = uniqueElements[numberToClick - 1]
+  let action = kAXPressAction as CFString
+  let result = AXUIElementPerformAction(elementToClick.element, action)
+
+  if result == .success {
+    print("✅ Successfully clicked on element #\(numberToClick): \"\(elementToClick.title)\"")
+  } else {
+    print("❌ Failed to click element #\(numberToClick). Error: \(result.rawValue)")
+  }
+  exit(0)
+}
+
+print("\n📋 Clickable elements in Chrome (Voice Control style):")
+print(String(repeating: "=", count: 80))
+
+for (index, element) in uniqueElements.enumerated() {
+  let number = String(format: "%3d", index + 1)
+  let role = element.role.replacingOccurrences(of: "AX", with: "")
+  let title = String(element.title.prefix(35))
+
+  var posStr = "        "
+  if let pos = element.position {
+    posStr = String(format: "(%3.0f,%3.0f)", pos.x, pos.y)
+  }
+
+  var sizeStr = ""
+  if let size = element.size {
+    sizeStr = String(format: " [%dx%d]", Int(size.width), Int(size.height))
+  }
+
+  print(
+    "\(number): [\(role.padding(toLength: 12, withPad: " ", startingAt: 0))] \(posStr)\(sizeStr) \(title)"
+  )
+}
+
+print("\n🎯 Total: \(uniqueElements.count) unique clickable elements!")
+print("This matches what Voice Control shows when you say 'Show Numbers'")
+
+if uniqueElements.count > 100 {
+  print("💡 Tip: This is a lot of elements! Voice Control usually filters these better.")
+}

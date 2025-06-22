@@ -42,7 +42,7 @@ function createWindow() {
     height: 198,
     resizable: false,
     trafficLightPosition: { x: -100, y: -100 },
-    // alwaysOnTop: true,
+    alwaysOnTop: false,
     ...(process.platform === "darwin"
       ? {
           autoHideMenuBar: true,
@@ -109,7 +109,13 @@ ipcMain.on("message", async (event, msg) => {
     console.error(err);
   }
 
-  let stepHistory = "";
+  const history: {
+    step: string;
+    script?: string;
+    error?: string;
+  }[] = [];
+
+  // eslint-disable-next-line no-constant-condition
   while (true) {
     console.log("taking screenshot");
 
@@ -142,28 +148,70 @@ ipcMain.on("message", async (event, msg) => {
       if (err) console.error(err);
     });
 
-    const stepsOutput = (
-      await run(stepsAgent, [
-        {
-          role: "user",
-          content: [
-            {
-              type: "input_text",
-              text: `Initial task request: ${msg}
+    const formattedHistory = history
+      .map(
+        (item) =>
+          `- Step: ${item.step}` +
+          (item.script ? `\n  - Script:\n${item.script}` : "") +
+          (item.error
+            ? `\n  - Status: Failed\n  - Error: ${item.error}`
+            : `\n  - Status: Success`)
+      )
+      .join("\n\n");
+
+    let structuredDOM = "";
+    try {
+      const { stdout: frontApp } = await execPromise(
+        `osascript -e 'tell application "System Events" to get name of first application process whose frontmost is true'`
+      );
+      if (frontApp.trim() === "Safari") {
+        const jsToInject = `function serializeDOM(node) { if (!node || node.nodeType !== 1) return null; const children = [...node.children].map(serializeDOM).filter(Boolean); return { tag: node.tagName, id: node.id || null, class: node.className || null, role: node.getAttribute('role') || null, text: node.innerText?.trim().slice(0, 100) || null, clickable: typeof node.onclick === 'function' || ['A', 'BUTTON'].includes(node.tagName), children: children.length ? children : null }; } JSON.stringify(serializeDOM(document.body));`;
+        const { stdout: safariDOM } = await execPromise(
+          `osascript -e 'tell application "Safari" to do JavaScript "${jsToInject.replace(
+            /"/g,
+            '\\"'
+          )}"'`,
+          { maxBuffer: 1024 * 1024 * 50 } // 50MB
+        );
+        structuredDOM = safariDOM;
+      }
+    } catch (e) {
+      console.error("Could not get Safari DOM", e);
+    }
+
+    const userContent: (
+      | {
+          type: "input_text";
+          text: string;
+        }
+      | {
+          type: "input_image";
+          image: string;
+        }
+    )[] = [
+      {
+        type: "input_text",
+        text: `Initial task request: ${msg}
 
   All previous steps taken so far:
-  ${stepHistory}
+  ${formattedHistory}
   `,
-            },
-            { type: "input_image", image: img },
-          ],
-        },
-      ])
+      },
+      { type: "input_image", image: img },
+    ];
+
+    const textInput = userContent[0];
+    if (structuredDOM && textInput.type === "input_text") {
+      console.log("structuredDom", structuredDOM);
+      textInput.text += `\n\nHere is a structured JSON representation of the DOM of the current Safari page:\n${structuredDOM}`;
+    }
+
+    const stepsOutput = (
+      await run(stepsAgent, [{ role: "user", content: userContent }])
     ).state._currentStep;
     console.log(stepsOutput);
     if (stepsOutput?.type != "next_step_final_output") return;
     const stepString = stepsOutput?.output;
-    stepHistory += "\n" + stepString;
     if (stepString == "stop") break;
     new Notification({ title: "Running Step", body: stepString }).show();
 
@@ -192,8 +240,13 @@ ipcMain.on("message", async (event, msg) => {
             {
               type: "input_text",
               text: `Instruction to execute: ${stepString}
-
-Dimensions of window: ${width}x${height}`,
+${formattedHistory ? `\nLast 5 steps:\n${formattedHistory}` : ""}
+Dimensions of window: ${width}x${height}
+${
+  structuredDOM
+    ? `\nHere is a structured JSON representation of the DOM of the current Safari page:\n${structuredDOM}`
+    : ""
+}`,
             },
             { type: "input_image", image: img },
           ],
@@ -216,13 +269,24 @@ Dimensions of window: ${width}x${height}`,
         );
         if (stderr) {
           console.error(`stderr: ${stderr}`);
+          history.push({ step: stepString, script, error: stderr });
+          continue;
         }
         if (stdout) {
           console.log(stdout);
         }
-      } catch (e) {
+        history.push({ step: stepString, script });
+      } catch (e: unknown) {
         console.error("error executing script: ", e);
+        const errorMessage = e instanceof Error ? e.message : String(e);
+        history.push({ step: stepString, script, error: errorMessage });
+        continue;
       }
+    } else {
+      history.push({ step: stepString });
+    }
+    if (history.length > 5) {
+      history.shift();
     }
   }
   new Notification({ title: "Task complete", body: "we are done" }).show();
