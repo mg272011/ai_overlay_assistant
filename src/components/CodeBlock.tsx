@@ -1,19 +1,27 @@
 import ShikiHighlighter, { 
-  createHighlighterCore,        // re-exported from shiki/core
-  createOnigurumaEngine,        // re-exported from shiki/engine/oniguruma
-  createJavaScriptRegexEngine,  // re-exported from shiki/engine/javascript
+  createHighlighterCore,
+  createOnigurumaEngine, 
 } from 'react-shiki/core';
 
-// Create custom highlighter with dynamic imports to optimize client-side bundle size
+import { addCopyButton } from 'shiki-transformer-copy-button'
+
 const highlighter = await createHighlighterCore({
-  themes: [import('@shikijs/themes/vitesse-dark')],
+  themes: [import('@shikijs/themes/vitesse-black')],
   langs: [import('@shikijs/langs/applescript')],
-  engine: createOnigurumaEngine(import('shiki/wasm')) 
-    // or createJavaScriptRegexEngine()
+  engine: createOnigurumaEngine(import('shiki/wasm'))
 });
 
 const CodeBlock = ({ code }: { code: string }) => (
-    <ShikiHighlighter highlighter={highlighter} language="applescript" showLanguage={false} showLineNumbers={true} theme="vitesse-dark">
+    
+    <ShikiHighlighter
+        highlighter={highlighter}
+        language="applescript"
+        showLanguage={true}
+        showLineNumbers={true}
+        theme="vitesse-black"
+        transformers={[addCopyButton({})]}
+        className="text-xs"
+    >
       {code.trim()}
     </ShikiHighlighter>
 )
