@@ -1,5 +1,12 @@
 import "dotenv/config";
-import { app, BrowserWindow, ipcMain, screen, Notification } from "electron";
+import {
+  app,
+  BrowserWindow,
+  ipcMain,
+  screen,
+  Notification,
+  nativeImage,
+} from "electron";
 import { fileURLToPath } from "node:url";
 import { run } from "@openai/agents";
 import { stepsAgent, scriptsAgent } from "./ai.ts";
@@ -8,6 +15,9 @@ import { exec } from "node:child_process";
 import { promisify } from "node:util";
 import fs, { writeFile } from "fs";
 import { Jimp } from "jimp";
+
+app.setName("Opus");
+app.setAboutPanelOptions({ applicationName: "Opus" });
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -77,9 +87,9 @@ let win: BrowserWindow | null;
 
 function createWindow() {
   win = new BrowserWindow({
-    icon: path.join(process.env.VITE_PUBLIC, "electron-vite.svg"),
+    icon: path.join(process.env.VITE_PUBLIC, "click.png"),
     width: 500,
-    height: 198,
+    height: 140,
     resizable: false,
     trafficLightPosition: { x: -100, y: -100 },
     alwaysOnTop: false,
@@ -128,13 +138,30 @@ app.on("activate", () => {
   }
 });
 
-app.whenReady().then(createWindow);
+app.whenReady().then(() => {
+  if (process.platform === "darwin") {
+    const icon = nativeImage.createFromPath(
+      path.join(process.env.VITE_PUBLIC, "click.png")
+    );
+    app.dock.setIcon(icon);
+  }
+  new Notification({
+    title: "Hello from Opus",
+    body: "Opus is ready! Type a prompt and run your first task.",
+  }).show();
+  createWindow();
+});
 
 ipcMain.on("message", async (event, msg) => {
   console.log("Got message:", msg);
   win?.setSize(500, 500);
   const primaryDisplay = screen.getPrimaryDisplay();
   const { width, height } = primaryDisplay.workAreaSize;
+  if (win) {
+    const [winWidth] = win.getSize();
+    const x = Math.round(width * 0.85 - winWidth / 2);
+    win.setPosition(x, 50);
+  }
   console.log(width, height);
   console.log("getting steps");
 
@@ -282,13 +309,15 @@ ipcMain.on("message", async (event, msg) => {
         body: stepString.replace(" STOP", ""),
       }).show();
 
-      event.sender.send("reply", { type: 'complete', message: stepString.replace(" STOP", "")});
+      event.sender.send("reply", {
+        type: "complete",
+        message: stepString.replace(" STOP", ""),
+      });
 
       break;
     }
     new Notification({ title: "Running Step", body: stepString }).show();
-    event.sender.send("reply", { type: 'info', message: stepString });
-
+    event.sender.send("reply", { type: "info", message: stepString });
 
     const clickMatch = stepString.match(/^Click element (\d+)$/i);
     if (clickMatch) {
@@ -395,7 +424,7 @@ ${
     if (history.length > 5) {
       history.shift();
     }
-    await new Promise((resolve) => setTimeout(resolve, 250));
+    // await new Promise((resolve) => setTimeout(resolve, 250));
     console.timeEnd("while-loop-iteration");
   }
 });
