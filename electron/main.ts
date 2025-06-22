@@ -155,23 +155,23 @@ ipcMain.on("message", async (event, msg) => {
           (item.script ? `\n  - Script:\n${item.script}` : "") +
           (item.error
             ? `\n  - Status: Failed\n  - Error: ${item.error}`
-            : `\n  - Status: Success`)
+            : `\n  - Status: Success`),
       )
       .join("\n\n");
 
     let structuredDOM = "";
     try {
       const { stdout: frontApp } = await execPromise(
-        `osascript -e 'tell application "System Events" to get name of first application process whose frontmost is true'`
+        `osascript -e 'tell application "System Events" to get name of first application process whose frontmost is true'`,
       );
       if (frontApp.trim() === "Safari") {
         const jsToInject = `function serializeDOM(node) { if (!node || node.nodeType !== 1) return null; const children = [...node.children].map(serializeDOM).filter(Boolean); return { tag: node.tagName, id: node.id || null, class: node.className || null, role: node.getAttribute('role') || null, text: node.innerText?.trim().slice(0, 100) || null, clickable: typeof node.onclick === 'function' || ['A', 'BUTTON'].includes(node.tagName), children: children.length ? children : null }; } JSON.stringify(serializeDOM(document.body));`;
         const { stdout: safariDOM } = await execPromise(
           `osascript -e 'tell application "Safari" to do JavaScript "${jsToInject.replace(
             /"/g,
-            '\\"'
+            '\\"',
           )}"'`,
-          { maxBuffer: 1024 * 1024 * 50 } // 50MB
+          { maxBuffer: 1024 * 1024 * 50 }, // 50MB
         );
         structuredDOM = safariDOM;
       }
@@ -229,7 +229,7 @@ ipcMain.on("message", async (event, msg) => {
       function (err) {
         if (err) console.log("error" + err);
         //   console.log(typeof img, img);
-      }
+      },
     );
 
     const scriptOutput = (
@@ -265,7 +265,7 @@ ${
           if (err) console.error(err);
         });
         const { stdout, stderr } = await execPromise(
-          `osascript ./temp/script.scpt`
+          `osascript ./temp/script.scpt`,
         );
         if (stderr) {
           console.error(`stderr: ${stderr}`);
