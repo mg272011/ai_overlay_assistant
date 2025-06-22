@@ -61,7 +61,7 @@ Some examples of good instructions to return:
 "Create a new tab" or
 "Navigate to https://mail.google.com"
 
-If the screenshot indicates that the task has been completed successfully, simply reply with "stop"
+If the screenshot indicates that the task has been completed successfully, simply reply with a very short message (a few words) stating that the task has been finished, appending the word STOP in all caps at the end. For example: "You are already registered STOP".
 `,
   modelSettings: {
     temperature: 0.1,

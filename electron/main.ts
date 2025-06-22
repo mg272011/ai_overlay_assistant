@@ -157,9 +157,13 @@ ipcMain.on("message", async (event, msg) => {
 
   // eslint-disable-next-line no-constant-condition
   while (true) {
+    console.time("while-loop-iteration");
     console.log("taking screenshot");
 
+    console.time("fetchAllClickableItems");
     const clickableItems = await fetchAllClickableItems();
+    console.timeEnd("fetchAllClickableItems");
+
     const clickableItemsText =
       clickableItems.length > 0
         ? `\n\nHere is a list of clickable elements on the screen:\n${clickableItems
@@ -174,6 +178,7 @@ ipcMain.on("message", async (event, msg) => {
     // const tmpPath = path.join(os.tmpdir(), "temp_screenshot.png");
     const tmpPath = path.join(__dirname, `${Date.now()}-screenshot.png`);
 
+    console.time("screenshot-and-process");
     await execPromise(`screencapture -C -x "${tmpPath}"`);
     const image = await Jimp.read(tmpPath);
     image.resize({ w: width, h: height });
@@ -199,6 +204,7 @@ ipcMain.on("message", async (event, msg) => {
     fs.unlink(tmpPath, (err) => {
       if (err) console.error(err);
     });
+    console.timeEnd("screenshot-and-process");
 
     const formattedHistory = history
       .map(
@@ -213,6 +219,7 @@ ipcMain.on("message", async (event, msg) => {
 
     let frontApp = "";
     let structuredDOM = "";
+    console.time("get-front-app-and-dom");
     try {
       const { stdout } = await execPromise(
         `osascript -e 'tell application "System Events" to get name of first application process whose frontmost is true'`
@@ -232,6 +239,7 @@ ipcMain.on("message", async (event, msg) => {
     } catch (e) {
       console.error("Could not get Safari DOM", e);
     }
+    console.timeEnd("get-front-app-and-dom");
 
     const userContent: (
       | {
@@ -260,19 +268,29 @@ ipcMain.on("message", async (event, msg) => {
       textInput.text += `\n\nHere is a structured JSON representation of the DOM of the current Safari page:\n${structuredDOM}`;
     }
 
+    console.time("stepsAgent-run");
     const stepsOutput = (
       await run(stepsAgent, [{ role: "user", content: userContent }])
     ).state._currentStep;
+    console.timeEnd("stepsAgent-run");
     console.log(stepsOutput);
     if (stepsOutput?.type != "next_step_final_output") return;
     const stepString = stepsOutput?.output;
-    if (stepString == "stop") break;
+    if (stepString.includes("STOP")) {
+      new Notification({
+        title: "Task complete",
+        body: stepString.replace(" STOP", ""),
+      }).show();
+      break;
+    }
     new Notification({ title: "Running Step", body: stepString }).show();
 
     const clickMatch = stepString.match(/^Click element (\d+)$/i);
     if (clickMatch) {
       const elementId = parseInt(clickMatch[1], 10);
+      console.time("clickItem");
       const result = await clickItem(elementId);
+      console.timeEnd("clickItem");
       const historyEntry = {
         step: stepString,
         script: `clickItem(${elementId})`,
@@ -285,6 +303,7 @@ ipcMain.on("message", async (event, msg) => {
       if (result.error) {
         console.error(`Failed to click element ${elementId}:`, result.error);
       }
+      console.timeEnd("while-loop-iteration");
       continue;
     }
 
@@ -292,6 +311,7 @@ ipcMain.on("message", async (event, msg) => {
 
     const base64Data = img.replace(/^data:image\/png;base64,/, "");
 
+    console.time("writeFile-screenshot");
     writeFile(
       `${folderName}/${Date.now()}-${stepString
         .replaceAll(" ", "-")
@@ -302,9 +322,11 @@ ipcMain.on("message", async (event, msg) => {
       function (err) {
         if (err) console.log("error" + err);
         //   console.log(typeof img, img);
+        console.timeEnd("writeFile-screenshot");
       }
     );
 
+    console.time("scriptsAgent-run");
     const scriptOutput = (
       await run(scriptsAgent, [
         {
@@ -328,6 +350,7 @@ ${
         },
       ])
     ).state._currentStep;
+    console.timeEnd("scriptsAgent-run");
     if (scriptOutput?.type != "next_step_final_output") continue;
     let script = scriptOutput?.output;
 
@@ -336,12 +359,16 @@ ${
       try {
         // const scriptWithEscapedQuotes = script.replace(/"/g, '\\"');
         console.log(script);
+        console.time("writeFile-script");
         writeFile("./temp/script.scpt", script, (err) => {
           if (err) console.error(err);
+          console.timeEnd("writeFile-script");
         });
+        console.time("run-applescript");
         const { stdout, stderr } = await execPromise(
           `osascript ./temp/script.scpt`
         );
+        console.timeEnd("run-applescript");
         if (stderr) {
           console.error(`stderr: ${stderr}`);
           history.push({ step: stepString, script, error: stderr });
@@ -364,8 +391,8 @@ ${
       history.shift();
     }
     await new Promise((resolve) => setTimeout(resolve, 250));
+    console.timeEnd("while-loop-iteration");
   }
-  new Notification({ title: "Task complete", body: "we are done" }).show();
 
   event.sender.send("reply", "Received: " + msg);
 });
