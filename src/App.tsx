@@ -100,7 +100,7 @@ const App = () => {
                 </>
               : <div className="flex gap-2">
                 <Icon stroke={1.5} />
-                <p><strong>{titleCaseType}</strong> - {message}</p>
+                <p>{message}</p>
               </div>
               }
             </div>

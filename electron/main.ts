@@ -281,7 +281,8 @@ ipcMain.on("message", async (event, msg) => {
         title: "Task complete",
         body: stepString.replace(" STOP", ""),
       }).show();
-      event.sender.send("reply", { type: 'info', message: stepString.replace(" STOP", "")});
+
+      event.sender.send("reply", { type: 'complete', message: stepString.replace(" STOP", "")});
 
       break;
     }
