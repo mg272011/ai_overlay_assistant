@@ -363,6 +363,7 @@ ${
     if (history.length > 5) {
       history.shift();
     }
+    await new Promise((resolve) => setTimeout(resolve, 250));
   }
   new Notification({ title: "Task complete", body: "we are done" }).show();
 

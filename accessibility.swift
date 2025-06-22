@@ -221,54 +221,6 @@ for element in allElements {
 
 // --- Command Handling ---
 
-if CommandLine.arguments.count > 1,
-  ["scroll-up", "scroll-down"].contains(CommandLine.arguments[1])
-{
-  var elementToScroll: AXUIElement?
-
-  func findScrollArea(in element: AXUIElement) -> AXUIElement? {
-    if let role = getStringAttribute(from: element, attribute: "AXRole"), role == "AXScrollArea" {
-      return element
-    }
-    if let children = getArrayAttribute(from: element, attribute: "AXChildren") {
-      for child in children {
-        if let found = findScrollArea(in: child) {
-          return found
-        }
-      }
-    }
-    return nil
-  }
-
-  for window in windows {
-    if let scrollArea = findScrollArea(in: window) {
-      elementToScroll = scrollArea
-      break
-    }
-  }
-
-  if elementToScroll == nil, !windows.isEmpty {
-    elementToScroll = windows[0]
-  }
-
-  if let element = elementToScroll {
-    let action: String =
-      CommandLine.arguments[1] == "scroll-up"
-      ? kAXScrollPageUpAction : kAXScrollPageDownAction
-    let result = AXUIElementPerformAction(element, action as CFString)
-    if result == .success {
-      print("{\"success\": true, \"action\": \"\(CommandLine.arguments[1])\"}")
-    } else {
-      print(
-        "{\"success\": false, \"error\": \"Failed to scroll. Error: \(result.rawValue)\"}"
-      )
-    }
-  } else {
-    print("{\"success\": false, \"error\": \"No scrollable area found.\"}")
-  }
-  exit(0)
-}
-
 // 1. Click Command
 if CommandLine.arguments.count > 2, CommandLine.arguments[1] == "click",
   let numberToClick = Int(CommandLine.arguments[2])
@@ -289,9 +241,12 @@ if CommandLine.arguments.count > 2, CommandLine.arguments[1] == "click",
       "{\"success\": true, \"clicked_element\": {\"id\": \(numberToClick), \"title\": \"\(elementToClick.title)\"}}"
     )
   } else {
-    print(
-      "{\"success\": false, \"error\": \"Failed to click element #\(numberToClick). Error: \(result.rawValue)\"}"
-    )
+    var errorString = "Failed to click element #\(numberToClick). Error: \(result.rawValue)"
+    if result.rawValue == -25200 {  // kAXErrorAPIDisabled
+      errorString +=
+        ". This typically means the app/terminal running this script does not have Accessibility permissions. Please grant access in System Settings > Privacy & Security > Accessibility."
+    }
+    print("{\"success\": false, \"error\": \"\(errorString)\"}")
   }
   exit(0)
 }
