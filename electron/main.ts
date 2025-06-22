@@ -13,6 +13,46 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const execPromise = promisify(exec);
 
+export interface ClickableItem {
+  id: number;
+  role: string;
+  title: string;
+  description: string;
+}
+
+export async function fetchAllClickableItems(): Promise<ClickableItem[]> {
+  try {
+    const { stdout } = await execPromise("./accessibility.swift json-list");
+    if (!stdout) {
+      return [];
+    }
+    return JSON.parse(stdout) as ClickableItem[];
+  } catch (error) {
+    console.error("Failed to fetch clickable items:", error);
+    return [];
+  }
+}
+
+export async function clickItem(id: number): Promise<{
+  success: boolean;
+  clicked_element?: { id: number; title: string };
+  error?: string;
+}> {
+  try {
+    const { stdout } = await execPromise(`./accessibility.swift click ${id}`);
+    return JSON.parse(stdout);
+  } catch (error) {
+    console.error(`Failed to click item ${id}:`, error);
+    const errorMessage =
+      error instanceof Error ? error.message : "Unknown error";
+    try {
+      return JSON.parse(errorMessage);
+    } catch {
+      return { success: false, error: errorMessage };
+    }
+  }
+}
+
 // The built directory structure
 //
 // ├─┬─┬ dist
@@ -119,8 +159,20 @@ ipcMain.on("message", async (event, msg) => {
   while (true) {
     console.log("taking screenshot");
 
+    const clickableItems = await fetchAllClickableItems();
+    const clickableItemsText =
+      clickableItems.length > 0
+        ? `\n\nHere is a list of clickable elements on the screen:\n${clickableItems
+            .map(
+              (item) =>
+                `  - ID: ${item.id}, Role: ${item.role}, Title: ${item.title}`
+            )
+            .join("\n")}`
+        : "";
+    console.log(clickableItemsText);
+
     // const tmpPath = path.join(os.tmpdir(), "temp_screenshot.png");
-    const tmpPath = path.join(__dirname, `${Date.now}-screenshot.png`);
+    const tmpPath = path.join(__dirname, `${Date.now()}-screenshot.png`);
 
     await execPromise(`screencapture -C -x "${tmpPath}"`);
     const image = await Jimp.read(tmpPath);
@@ -155,23 +207,25 @@ ipcMain.on("message", async (event, msg) => {
           (item.script ? `\n  - Script:\n${item.script}` : "") +
           (item.error
             ? `\n  - Status: Failed\n  - Error: ${item.error}`
-            : `\n  - Status: Success`),
+            : `\n  - Status: Success`)
       )
       .join("\n\n");
 
+    let frontApp = "";
     let structuredDOM = "";
     try {
-      const { stdout: frontApp } = await execPromise(
-        `osascript -e 'tell application "System Events" to get name of first application process whose frontmost is true'`,
+      const { stdout } = await execPromise(
+        `osascript -e 'tell application "System Events" to get name of first application process whose frontmost is true'`
       );
-      if (frontApp.trim() === "Safari") {
+      frontApp = stdout.trim();
+      if (frontApp === "Safari") {
         const jsToInject = `function serializeDOM(node) { if (!node || node.nodeType !== 1) return null; const children = [...node.children].map(serializeDOM).filter(Boolean); return { tag: node.tagName, id: node.id || null, class: node.className || null, role: node.getAttribute('role') || null, text: node.innerText?.trim().slice(0, 100) || null, clickable: typeof node.onclick === 'function' || ['A', 'BUTTON'].includes(node.tagName), children: children.length ? children : null }; } JSON.stringify(serializeDOM(document.body));`;
         const { stdout: safariDOM } = await execPromise(
           `osascript -e 'tell application "Safari" to do JavaScript "${jsToInject.replace(
             /"/g,
-            '\\"',
+            '\\"'
           )}"'`,
-          { maxBuffer: 1024 * 1024 * 50 }, // 50MB
+          { maxBuffer: 1024 * 1024 * 50 } // 50MB
         );
         structuredDOM = safariDOM;
       }
@@ -192,10 +246,10 @@ ipcMain.on("message", async (event, msg) => {
       {
         type: "input_text",
         text: `Initial task request: ${msg}
-
+  The current application in focus is ${frontApp}.
   All previous steps taken so far:
   ${formattedHistory}
-  `,
+  ${clickableItemsText}`,
       },
       { type: "input_image", image: img },
     ];
@@ -215,6 +269,25 @@ ipcMain.on("message", async (event, msg) => {
     if (stepString == "stop") break;
     new Notification({ title: "Running Step", body: stepString }).show();
 
+    const clickMatch = stepString.match(/^Click element (\d+)$/i);
+    if (clickMatch) {
+      const elementId = parseInt(clickMatch[1], 10);
+      const result = await clickItem(elementId);
+      const historyEntry = {
+        step: stepString,
+        script: `clickItem(${elementId})`,
+        ...(result.error && { error: result.error }),
+      };
+      history.push(historyEntry);
+      if (history.length > 5) {
+        history.shift();
+      }
+      if (result.error) {
+        console.error(`Failed to click element ${elementId}:`, result.error);
+      }
+      continue;
+    }
+
     console.log(`${Date.now()} - ${stepString}`);
 
     const base64Data = img.replace(/^data:image\/png;base64,/, "");
@@ -229,7 +302,7 @@ ipcMain.on("message", async (event, msg) => {
       function (err) {
         if (err) console.log("error" + err);
         //   console.log(typeof img, img);
-      },
+      }
     );
 
     const scriptOutput = (
@@ -241,7 +314,9 @@ ipcMain.on("message", async (event, msg) => {
               type: "input_text",
               text: `Instruction to execute: ${stepString}
 ${formattedHistory ? `\nLast 5 steps:\n${formattedHistory}` : ""}
+The current application in focus is ${frontApp}.
 Dimensions of window: ${width}x${height}
+${clickableItemsText}
 ${
   structuredDOM
     ? `\nHere is a structured JSON representation of the DOM of the current Safari page:\n${structuredDOM}`
@@ -265,7 +340,7 @@ ${
           if (err) console.error(err);
         });
         const { stdout, stderr } = await execPromise(
-          `osascript ./temp/script.scpt`,
+          `osascript ./temp/script.scpt`
         );
         if (stderr) {
           console.error(`stderr: ${stderr}`);

@@ -57,54 +57,6 @@ func getSize(from element: AXUIElement) -> CGSize? {
   return nil
 }
 
-print("Chrome Accessibility Scanner")
-print("============================")
-
-// Check if accessibility is enabled
-let trusted = AXIsProcessTrusted()
-print("Accessibility trusted: \(trusted)")
-
-if !trusted {
-  print("❌ Accessibility not enabled.")
-  print("Go to: System Preferences > Security & Privacy > Privacy > Accessibility")
-  print("Add Terminal and make sure it's checked.")
-  exit(1)
-}
-
-// Get running applications via NSWorkspace
-let runningApps = NSWorkspace.shared.runningApplications
-print("✅ Found \(runningApps.count) running applications")
-
-// Find Chrome
-var chromeApp: AXUIElement?
-print("\nLooking for Chrome...")
-for app in runningApps {
-  if let name = app.localizedName, name.lowercased().contains("chrome") {
-    chromeApp = AXUIElementCreateApplication(app.processIdentifier)
-    print("✅ Found Chrome: \(name)")
-    break
-  }
-}
-
-guard let chrome = chromeApp else {
-  print("❌ Chrome not found. Available apps:")
-  for app in runningApps.prefix(10) {
-    if let name = app.localizedName {
-      print("  - \(name)")
-    }
-  }
-  print("\nMake sure Google Chrome is running and try again.")
-  exit(1)
-}
-
-// Get Chrome windows
-guard let windows = getArrayAttribute(from: chrome, attribute: "AXWindows") else {
-  print("❌ Could not get Chrome windows")
-  exit(1)
-}
-
-print("🔍 Scanning \(windows.count) Chrome window(s)...")
-
 func isClickableRole(_ role: String) -> Bool {
   let clickableRoles = [
     "AXButton",
@@ -126,7 +78,15 @@ func isClickableRole(_ role: String) -> Bool {
   return clickableRoles.contains(role)
 }
 
-struct ClickableElement {
+struct ClickableElement: Codable {
+  var id: Int?
+  let role: String
+  let title: String
+  let description: String
+}
+
+// Overload for the script's internal use
+struct ClickableElementInternal {
   let element: AXUIElement
   let role: String
   let title: String
@@ -134,10 +94,10 @@ struct ClickableElement {
   let size: CGSize?
 }
 
-func scanElement(_ element: AXUIElement, depth: Int = 0) -> [ClickableElement] {
+func scanElement(_ element: AXUIElement, depth: Int = 0) -> [ClickableElementInternal] {
   guard depth < 25 else { return [] }  // Prevent infinite recursion
 
-  var results: [ClickableElement] = []
+  var results: [ClickableElementInternal] = []
 
   // Get role
   guard let role = getStringAttribute(from: element, attribute: "AXRole") else {
@@ -166,7 +126,7 @@ func scanElement(_ element: AXUIElement, depth: Int = 0) -> [ClickableElement] {
 
     if shouldInclude {
       results.append(
-        ClickableElement(
+        ClickableElementInternal(
           element: element,
           role: role,
           title: title.isEmpty ? "(no text)" : title,
@@ -186,17 +146,68 @@ func scanElement(_ element: AXUIElement, depth: Int = 0) -> [ClickableElement] {
   return results
 }
 
-var allElements: [ClickableElement] = []
+let showOutput =
+  CommandLine.arguments.count < 2
+  || (CommandLine.arguments[1] != "json-list" && CommandLine.arguments[1] != "click")
+
+if showOutput {
+  print("Accessibility Scanner")
+  print("============================")
+}
+
+// Check if accessibility is enabled
+let trusted = AXIsProcessTrusted()
+if showOutput {
+  print("Accessibility trusted: \(trusted)")
+}
+
+if !trusted {
+  // Always print this error
+  print("❌ Accessibility not enabled.")
+  print("Go to: System Preferences > Security & Privacy > Privacy > Accessibility")
+  print("Add your terminal or application and make sure it's checked.")
+  exit(1)
+}
+
+// Get frontmost application
+guard let frontmostApp = NSWorkspace.shared.frontmostApplication else {
+  print("❌ Could not determine the frontmost application.")
+  exit(1)
+}
+let appElement = AXUIElementCreateApplication(frontmostApp.processIdentifier)
+
+if showOutput {
+  if let appName = frontmostApp.localizedName {
+    print("✅ Scanning active application: \(appName)")
+  } else {
+    print("✅ Scanning active application.")
+  }
+}
+
+// Get application windows
+guard let windows = getArrayAttribute(from: appElement, attribute: "AXWindows") else {
+  print("❌ Could not get application windows")
+  exit(1)
+}
+if showOutput {
+  print("🔍 Scanning \(windows.count) window(s)...")
+}
+
+var allElements: [ClickableElementInternal] = []
 
 for (index, window) in windows.enumerated() {
-  print("Scanning window \(index + 1)...")
+  if showOutput {
+    print("Scanning window \(index + 1)...")
+  }
   let elements = scanElement(window)
   allElements.append(contentsOf: elements)
-  print("  Found \(elements.count) clickable elements")
+  if showOutput {
+    print("  Found \(elements.count) clickable elements")
+  }
 }
 
 // Remove duplicates based on position and title
-var uniqueElements: [ClickableElement] = []
+var uniqueElements: [ClickableElementInternal] = []
 for element in allElements {
   let isDuplicate = uniqueElements.contains { existing in
     existing.title == element.title && existing.position?.x == element.position?.x
@@ -208,9 +219,64 @@ for element in allElements {
   }
 }
 
-if CommandLine.arguments.count > 1, let numberToClick = Int(CommandLine.arguments[1]) {
+// --- Command Handling ---
+
+if CommandLine.arguments.count > 1,
+  ["scroll-up", "scroll-down"].contains(CommandLine.arguments[1])
+{
+  var elementToScroll: AXUIElement?
+
+  func findScrollArea(in element: AXUIElement) -> AXUIElement? {
+    if let role = getStringAttribute(from: element, attribute: "AXRole"), role == "AXScrollArea" {
+      return element
+    }
+    if let children = getArrayAttribute(from: element, attribute: "AXChildren") {
+      for child in children {
+        if let found = findScrollArea(in: child) {
+          return found
+        }
+      }
+    }
+    return nil
+  }
+
+  for window in windows {
+    if let scrollArea = findScrollArea(in: window) {
+      elementToScroll = scrollArea
+      break
+    }
+  }
+
+  if elementToScroll == nil, !windows.isEmpty {
+    elementToScroll = windows[0]
+  }
+
+  if let element = elementToScroll {
+    let action: String =
+      CommandLine.arguments[1] == "scroll-up"
+      ? kAXScrollPageUpAction : kAXScrollPageDownAction
+    let result = AXUIElementPerformAction(element, action as CFString)
+    if result == .success {
+      print("{\"success\": true, \"action\": \"\(CommandLine.arguments[1])\"}")
+    } else {
+      print(
+        "{\"success\": false, \"error\": \"Failed to scroll. Error: \(result.rawValue)\"}"
+      )
+    }
+  } else {
+    print("{\"success\": false, \"error\": \"No scrollable area found.\"}")
+  }
+  exit(0)
+}
+
+// 1. Click Command
+if CommandLine.arguments.count > 2, CommandLine.arguments[1] == "click",
+  let numberToClick = Int(CommandLine.arguments[2])
+{
   guard numberToClick > 0, numberToClick <= uniqueElements.count else {
-    print("❌ Invalid number. Please provide a number between 1 and \(uniqueElements.count).")
+    print(
+      "{\"error\": \"Invalid number. Please provide a number between 1 and \(uniqueElements.count).\"}"
+    )
     exit(1)
   }
 
@@ -219,39 +285,73 @@ if CommandLine.arguments.count > 1, let numberToClick = Int(CommandLine.argument
   let result = AXUIElementPerformAction(elementToClick.element, action)
 
   if result == .success {
-    print("✅ Successfully clicked on element #\(numberToClick): \"\(elementToClick.title)\"")
+    print(
+      "{\"success\": true, \"clicked_element\": {\"id\": \(numberToClick), \"title\": \"\(elementToClick.title)\"}}"
+    )
   } else {
-    print("❌ Failed to click element #\(numberToClick). Error: \(result.rawValue)")
+    print(
+      "{\"success\": false, \"error\": \"Failed to click element #\(numberToClick). Error: \(result.rawValue)\"}"
+    )
   }
   exit(0)
 }
 
-print("\n📋 Clickable elements in Chrome (Voice Control style):")
-print(String(repeating: "=", count: 80))
-
-for (index, element) in uniqueElements.enumerated() {
-  let number = String(format: "%3d", index + 1)
-  let role = element.role.replacingOccurrences(of: "AX", with: "")
-  let title = String(element.title.prefix(35))
-
-  var posStr = "        "
-  if let pos = element.position {
-    posStr = String(format: "(%3.0f,%3.0f)", pos.x, pos.y)
+// 2. JSON List Command
+if CommandLine.arguments.count > 1, CommandLine.arguments[1] == "json-list" {
+  var elementsToEncode: [ClickableElement] = []
+  for (index, element) in uniqueElements.enumerated() {
+    let description = "\(element.role): \(element.title)"
+    elementsToEncode.append(
+      ClickableElement(
+        id: index + 1,
+        role: element.role,
+        title: element.title,
+        description: description
+      )
+    )
   }
-
-  var sizeStr = ""
-  if let size = element.size {
-    sizeStr = String(format: " [%dx%d]", Int(size.width), Int(size.height))
+  let encoder = JSONEncoder()
+  encoder.outputFormatting = .prettyPrinted
+  do {
+    let jsonData = try encoder.encode(elementsToEncode)
+    if let jsonString = String(data: jsonData, encoding: .utf8) {
+      print(jsonString)
+    }
+  } catch {
+    print("{\"error\": \"Failed to encode elements to JSON.\"}")
   }
-
-  print(
-    "\(number): [\(role.padding(toLength: 12, withPad: " ", startingAt: 0))] \(posStr)\(sizeStr) \(title)"
-  )
+  exit(0)
 }
 
-print("\n🎯 Total: \(uniqueElements.count) unique clickable elements!")
-print("This matches what Voice Control shows when you say 'Show Numbers'")
+// 3. Default: Human-readable output
+if showOutput {
+  print("\n📋 Clickable elements in current application (Voice Control style):")
+  print(String(repeating: "=", count: 80))
 
-if uniqueElements.count > 100 {
-  print("💡 Tip: This is a lot of elements! Voice Control usually filters these better.")
+  for (index, element) in uniqueElements.enumerated() {
+    let number = String(format: "%3d", index + 1)
+    let role = element.role.replacingOccurrences(of: "AX", with: "")
+    let title = String(element.title.prefix(35))
+
+    var posStr = "        "
+    if let pos = element.position {
+      posStr = String(format: "(%3.0f,%3.0f)", pos.x, pos.y)
+    }
+
+    var sizeStr = ""
+    if let size = element.size {
+      sizeStr = String(format: " [%dx%d]", Int(size.width), Int(size.height))
+    }
+
+    print(
+      "\(number): [\(role.padding(toLength: 12, withPad: " ", startingAt: 0))] \(posStr)\(sizeStr) \(title)"
+    )
+  }
+
+  print("\n🎯 Total: \(uniqueElements.count) unique clickable elements!")
+  print("This matches what Voice Control shows when you say 'Show Numbers'")
+
+  if uniqueElements.count > 100 {
+    print("💡 Tip: This is a lot of elements! Voice Control usually filters these better.")
+  }
 }
