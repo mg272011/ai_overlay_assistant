@@ -44,10 +44,7 @@ const App = () => {
   const [prompt, setPrompt] = useState("");
   const [sentPrompts, setSentPrompts] = useState<string[]>([]);
   const [firstPromptSent, setFirstPromptSent] = useState<boolean>(false)
-  const [messages, setMessages] = useState<message[]>([{
-    type: 'error',
-    message: 'tralalala'
-  }]);
+  const [messages, setMessages] = useState<message[]>([]);
 
   useEffect(() => {
     window.ipcRenderer.on("reply", (_, data: message) => {
@@ -65,20 +62,21 @@ const App = () => {
   };
 
   return (<div className="bg-bg h-screen">
-    {prompt && (
+    {firstPromptSent && (
       <div>
-        <div className="fixed bg-bg px-6 pt-6">
-          <p className="text-white/65 mb-4">{prompt}</p>
+        <div className="sticky top-0 bg-bg px-6 pt-6 w-full">
+          <p className="text-white/65 mb-4">{sentPrompts[0]}</p>
           <div className="border-b-1 border-white/25"></div>
         </div>
-        <div className="p-10"></div>
+        
       </div>
     )}
     
-    <div className="flex flex-col bg-bg text-tx p-8 pt-4 bg-2">
+    <div className="flex flex-col bg-bg text-tx px-8 bg-2">
       <div className="flex-grow">
 
         {messages.map(({ type, message }, i) => {
+          console.log(type, message)
           if (!(type in iconMap)) type = 'info'
           const Icon = iconMap[type as iconType]
           const bg = type in specialColors ? specialColors[type as specialColorType].bgColor : 'bg-bg-2'
@@ -111,14 +109,8 @@ const App = () => {
         {messages.length == 0 && <br />}
       </div>
 
-      <CodeBlock code={`
-tell application "Finder"
-    activate
-    display dialog "Hello from AppleScript!"
-end tell
-`} />
 
-      {!sentPrompts && <h1 className="font-[Comorant_Garamond] font-serif text-2xl mb-4 text-tx">
+      {!firstPromptSent && <h1 className="font-[Comorant_Garamond] font-serif text-2xl mb-4 text-tx">
         What do you want to run today?
       </h1>}
 
@@ -126,18 +118,18 @@ end tell
         <input
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
-          placeholder={sentPrompts ? "Provide more info..." :"Enter your prompt..."}
+          placeholder={sentPrompts ? "Provide more info..." : "Enter your prompt..."}
           className="flex-grow p-2 w-full h-full rounded-md bg-bg-2 focus:outline-none focus:ring focus:ring-ui-2 placeholder:text-tx-3 resize-none"
         />
         <button
           type="submit"
-          className="absolute bottom-2 right-2 bg-tx text-bg hover:bg-white transition hover:cursor-pointer font-bold p-1 rounded-md disabled:cursor-not-allowed disabled:opacity-50 disabled:bg-ui-2 disabled:text-white"
+          className="absolute right-5 top-1/2 -translate-y-1/2 bg-tx text-bg hover:bg-white transition hover:cursor-pointer font-bold p-1 rounded-md disabled:cursor-not-allowed disabled:opacity-50 disabled:bg-ui-2 disabled:text-white"
           disabled={prompt.length === 0}
         >
           <IconSend2 size={20} />
         </button>
       </form>
-
+      <div className="p-3"></div>
     </div>
   </div>);
 };
