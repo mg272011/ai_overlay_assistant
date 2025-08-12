@@ -19,6 +19,7 @@ export interface Element {
   AXURL?: string;
   AXDescription?: string;
   AXSubrole?: string;
+  AXFrame?: string;
 }
 
 export type ActionResult =
@@ -27,4 +28,10 @@ export type ActionResult =
   | BashScriptReturnType
   | ClickReturnType
   | KeyReturnType
+  | { type: "cursor-move"; x: number; y: number }
+  | { type: "cursor-click"; x: number; y: number }
+  | { type: "cursor-drag-start"; x: number; y: number }
+  | { type: "cursor-drag-move"; x: number; y: number }
+  | { type: "cursor-drag-end"; x: number; y: number }
+  | { type: "cursor-scroll"; x: number; y: number }
   | { type: "unknown tool" };

@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Audio Test</title>
+</head>
+<body>
+    <h1>Microphone Test</h1>
+    <button id="start">Start Recording</button>
+    <button id="stop">Stop Recording</button>
+    <div id="status">Click Start to test microphone</div>
+    
+    <script>
+        let stream = null;
+        let audioContext = null;
+        let source = null;
+        let analyser = null;
+        
+        document.getElementById('start').onclick = async () => {
+            try {
+                document.getElementById('status').textContent = 'Requesting microphone access...';
+                
+                stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                document.getElementById('status').textContent = '✅ Microphone access granted!';
+                
+                audioContext = new AudioContext();
+                source = audioContext.createMediaStreamSource(stream);
+                analyser = audioContext.createAnalyser();
+                source.connect(analyser);
+                
+                // Monitor audio levels
+                const dataArray = new Uint8Array(analyser.frequencyBinCount);
+                const checkLevel = () => {
+                    analyser.getByteFrequencyData(dataArray);
+                    const average = dataArray.reduce((a, b) => a + b) / dataArray.length;
+                    document.getElementById('status').textContent = `🎤 Audio level: ${Math.round(average)} (speak into mic)`;
+                    if (stream && stream.active) {
+                        requestAnimationFrame(checkLevel);
+                    }
+                };
+                checkLevel();
+                
+            } catch (error) {
+                document.getElementById('status').textContent = '❌ Error: ' + error.message;
+                console.error('Microphone error:', error);
+            }
+        };
+        
+        document.getElementById('stop').onclick = () => {
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+                stream = null;
+            }
+            if (audioContext) {
+                audioContext.close();
+                audioContext = null;
+            }
+            document.getElementById('status').textContent = 'Stopped';
+        };
+    </script>
+</body>
+</html> 

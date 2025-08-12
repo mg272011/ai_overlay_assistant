@@ -80,7 +80,7 @@ func sendKeyToPid(_ keyCode: CGKeyCode, _ pid: pid_t, modifiers: [String] = []) 
   keyUp?.flags = flags
   keyDown?.postToPid(pid)
   keyUp?.postToPid(pid)
-  usleep(5000)
+  usleep(1000)
 }
 
 func sendCharToPid(_ char: Character, _ pid: pid_t) {

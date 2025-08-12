@@ -3,7 +3,28 @@ import { Agent } from "@openai/agents";
 export const appSelectionAgent = new Agent({
   name: "App Selection Agent",
   model: "gpt-4.1-mini",
-  instructions: `You are given a user request for a task to perform on a Mac. Your job is to determine which application is most relevant to complete the task. Only return the name of the application, exactly as it appears in the macOS Applications folder or Dock (e.g., "Discord", "Safari", "Messages", "Obsidian"). Do not return anything else. Do not explain your answer. Only output the app name.`,
+  instructions: `You are given a user request for a task to perform on a Mac. Your job is to determine which application is most relevant to complete the task. 
+
+IMPORTANT: Only return "NONE" if the message is purely conversational (like "hi", "hello", "how are you", "thanks") or asking for information without any action.
+
+For ANY task that involves:
+- Ordering, buying, purchasing, shopping
+- Searching for information online
+- Looking up websites, companies, people
+- Researching topics
+- Finding products or services
+- Any web-based activity
+→ Return "Safari"
+
+For tasks involving:
+- Communication, messaging, calling
+→ Return the appropriate app like "Messages", "Discord", "Slack", etc.
+
+For tasks involving:
+- Writing, notes, documents
+→ Return appropriate apps like "TextEdit", "Pages", "Obsidian", etc.
+
+Only return the name of the application, exactly as it appears in the macOS Applications folder or Dock (e.g., "Safari", "Messages", "Discord", "Obsidian"), or "NONE" if truly no app is needed. Do not return anything else. Do not explain your answer. Only output the app name or "NONE".`,
   modelSettings: { temperature: 0.0 },
 });
 
@@ -13,6 +34,13 @@ export const actionAgent = new Agent({
   instructions: `
 <preface>
 You are an agent that generates an instruction to be executed. Generate the next step to accomplish the following task from the current position, indicated by the screenshot. Use the previous steps taken to inform your next action. If a previous step failed, you will see the error message and the script that caused it. Analyze the error and the script, and generate a new step to recover and continue the task. However, if you see that a strategy is failing repeatedly, you must backtrack and try a completely different solution. Don't get stuck in a loop. Do not add any extra fluff. Only give the instruction and nothing else. You are not talking to a human. You will eventually run these tasks. Just give me the frickin instruction man. You are making this instruction for a MacBook. Do not add anything before or after the instruction. Do not be creative. Do not add unnecessary things. If there are no previous steps, then you are generating the first step to be executed. Make each step as short concise, and simple as possible.
+
+IMPORTANT: Before executing any command, check for and correct common typos:
+- Remove extra quotes at the beginning or end of URLs or text
+- Fix common URL typos (e.g., "f"floweai.com" should be "floweai.com")
+- Remove stray characters that don't belong
+- Ensure URLs are properly formatted
+- If you detect a typo, use the corrected version in your command
 </preface>
 
 <specifications>
@@ -84,7 +112,12 @@ Start your response with =Bash to use this tool.
 Type into an application using the keyboard. Use this for typing text, or typing keyboard shortcuts. You may use modifier keys and special keys. If the application has keyboard shortcuts to perform an action, prefer using this instead of clicking UI elements.
 </usecase>
 <instructions>
-Expects the string to be typed into the application
+Expects the string to be typed into the application. IMPORTANT: Before typing, check for and correct any typos in the text:
+- Remove extra quotes at the beginning or end
+- Fix common URL typos (e.g., "f"floweai.com" → "floweai.com")
+- Remove stray characters that don't belong
+- Ensure the text is clean and properly formatted
+
 You may use modifier keys and special keys. To use them, you must first separate it from the other text with a space (\` \`), you must escape them with a carat (\`^\`). To type multiple keys at once, separate them with a plus (\`+\`). For example, "^cmd+t", or "foo ^enter". Do not put a space between your characters in one word. Another example "foo bar ^enter". Here is a list of all available modifiers and special keys:
 
 The following modifiers are supported:

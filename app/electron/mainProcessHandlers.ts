@@ -17,7 +17,6 @@ import { LiveAudioService } from "./services/LiveAudioService";
 import { geminiVision } from "./services/GeminiVisionService";
 import { initScreenHighlightService, getScreenHighlightService } from "./services/ScreenHighlightService";
 import { ContextualActionsService } from "./services/ContextualActionsService";
-import { spawn } from "node:child_process";
 // import { ListenService } from "./services/glass/ListenService"; // Replaced by JavaScript version
 
 function createLogFolder(userPrompt: string) {
@@ -63,6 +62,14 @@ let mainWindow: InstanceType<typeof BrowserWindow> | null = null;
 type ChatRole = 'user' | 'assistant';
 interface ChatMessage { role: ChatRole; content: string }
 const chatHistories = new Map<number, ChatMessage[]>();
+
+type PlanStep = {
+  id: number;
+  title: string;
+  action: 'open_app' | 'navigate_url' | 'agent';
+  params?: Record<string, any>;
+  check?: { type: 'app_frontmost' | 'url_contains'; value: string };
+};
 
 function getRecentHistoryString(senderId: number, limit: number = 4): string {
   const history = chatHistories.get(senderId) || [];
@@ -230,46 +237,35 @@ export function setupMainHandlers({ win }: { win: InstanceType<typeof BrowserWin
           // Ensure overlay shows on all spaces including fullscreen
           try { (win as any).setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true }); } catch {}
           try { win.setAlwaysOnTop(true, 'screen-saver'); } catch {}
+          try { win.setFullScreenable(false); } catch {}
           try { (win as any).moveTop(); } catch {}
-          try { (win as any).setFullScreenable?.(false); } catch {}
-          
-          // Reinforce frameless UI
-          win.setWindowButtonVisibility?.(false);
-          
-          // Inject CSS to remove any residual titlebar gaps and disable pointer-events by default
-          const css = `
-            html, body { background: transparent !important; }
-            body { pointer-events: none; }
-            .assistant-container, .content-area, .transcription-container, .insights-container,
-            .contextual-actions-container, button, input, [role="button"], .glass-chat-input-area { pointer-events: auto !important; }
-          `;
-          meetingCssKey = await win.webContents.insertCSS(css);
         } catch {}
       }
 
-      // Use Glass JavaScript implementation for meeting/live feedback
-      const glassService = await getGlassListenService();
-      
-      if (!glassService) {
-        throw new Error('Failed to initialize Glass service');
+      // Initialize Glass services if not yet
+      const listenSvc = await getGlassListenService();
+      if (listenSvc && !listenSvc.isSessionActive()) {
+        await listenSvc.initializeSession('en');
       }
 
-      console.log('[MainHandlers] Starting Glass JavaScript ListenService...');
-      await glassService.initializeSession('en');
-      await glassService.startMacOSAudioCapture(); // Start system audio capture
-      console.log('[MainHandlers] ✅ Glass JavaScript ListenService started successfully!');
-      
-      // Notify renderer that Glass is ready
+      // Start local live audio capture if available
+      const service = getLiveAudioService();
+      await service.start({
+        onGeminiChunk: (chunk) => { try { win?.webContents.send('gemini-transcript', chunk); } catch {} },
+        onTranscript: (res) => { try { win?.webContents.send('live-transcript', res); } catch {} },
+        onUtteranceEnd: () => { try { win?.webContents.send('utterance-end'); } catch {} },
+      });
+
+      // Focus renderer for quick actions
       if (win && !win.isDestroyed()) {
-        win.webContents.send("glass-ready");
-        win.webContents.send("live-audio-ready"); // Keep compatibility
+        win.webContents.send('live-audio-ready');
       }
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      console.error('[MainHandlers] ❌ Failed to start Glass JavaScript ListenService:', errorMessage);
-      if (win && !win.isDestroyed()) {
-        win.webContents.send("live-audio-error", errorMessage);
-      }
+      console.error('[MainHandlers] Failed to start conversation mode:', error);
+    if (win && !win.isDestroyed()) {
+      const msg = (error && (error as any).message) ? (error as any).message : String(error);
+      win.webContents.send('live-audio-error', msg);
+    }
     }
   });
   
@@ -286,11 +282,11 @@ export function setupMainHandlers({ win }: { win: InstanceType<typeof BrowserWin
       
       console.log('[MainHandlers] ✅ Glass JavaScript ListenService stopped');
       if (win && !win.isDestroyed()) {
-        // Reset window stacking and mouse behavior
+        // Keep window always on top even when stopping conversation
                   try {
-            win.setAlwaysOnTop(false);
-            // Turn off visible on all workspaces but keep window available
-            try { (win as any).setVisibleOnAllWorkspaces(false, { visibleOnFullScreen: false }); } catch {}
+            win.setAlwaysOnTop(true, 'screen-saver'); // Keep on top
+            // Keep visible on all workspaces including fullscreen
+            try { (win as any).setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true }); } catch {}
             // Keep traffic lights hidden when exiting live mode
             win.setWindowButtonVisibility?.(false);
             if (meetingCssKey) {
@@ -379,51 +375,213 @@ export function setupMainHandlers({ win }: { win: InstanceType<typeof BrowserWin
   });
 
   // Start a per-action meeting chat (separate from the main chat)
-  ipcMain.on('start-meeting-chat', async (event, data: { chatId: string, action: any }) => {
+  ipcMain.on('start-meeting-chat', async (event, payload: { chatId: string; action: any }) => {
     try {
-      const chatId = data.chatId;
-      const action = data.action || {};
-      // Build a focused prompt using the latest analysis and recent transcript if available
-      let recentContext = '';
-      try {
-        if (glassJSListenService) {
-          const session = glassJSListenService.getCurrentSessionData?.();
-          const turns = session?.conversationHistory || [];
-          const lastTurns = turns.slice(-12).map((t: any) => `${t.speaker}: ${t.text}`).join('\n');
-          recentContext = lastTurns;
-        }
-      } catch {}
+      const { chatId, action } = payload || {} as any;
+      if (!chatId) return;
 
-      // Say-next action prompt vs generic action
-      const sayNext = action?.type === 'say-next';
-      const baseContext = `You are helping me respond in real time to what OTHERS are saying in a meeting. The conversation lines labeled 'Them' are the computer/system audio (other participants). Always answer in first-person as what I should say out loud next. Be direct; do not explain your reasoning.`;
-      const userPrompt = sayNext
-        ? `${baseContext}\n\nConversation so far:\n${recentContext}\n\nWrite exactly one short sentence I should say next. No preface, no quotes.`
-        : `${baseContext}\n\nMy action request: ${action?.query || action?.text || 'Question'}\n\nConversation so far:\n${recentContext}\n\nReply concisely in first-person.`;
+      // Ensure contextual actions service is initialized
+    contextualActionsSvc = contextualActionsSvc || new ContextualActionsService();
 
-      const stream = runActionAgentStreaming(
-        'Desktop',
-        userPrompt,
-        [],
-        [],
-        undefined,
-        createLogFolder(`meeting-chat-${action?.text || action?.query || 'action'}`),
-        async () => 'ok',
-        false
-      );
-
-      (async () => {
-        let streamed = '';
-        for await (const chunk of stream) {
-          if (chunk.type === 'text') {
-            streamed += chunk.content;
-            event.sender.send('meeting-chat-stream', { chatId, type: 'text', content: chunk.content });
+      // Get recent conversation from Glass meeting service if available
+      let recent = '';
+      if (glassJSListenService) {
+        try {
+          // Get recent conversation turns from the Glass meeting service
+          const recentTurns = await glassJSListenService.getRecentTranscripts(6);
+          if (recentTurns && recentTurns.length > 0) {
+            recent = recentTurns.map((t: any) => `${t.speaker}: ${t.text}`).join('\n');
+            console.log('[MainHandlers] Got recent meeting context:', recent.substring(0, 200) + '...');
           }
+        } catch (err) {
+          console.log('[MainHandlers] Could not get recent transcripts from Glass meeting:', err);
         }
-        event.sender.send('meeting-chat-stream', { chatId, type: 'stream_end' });
-      })();
-    } catch (err) {
-      console.error('[MainHandlers] start-meeting-chat error:', err);
+      }
+      
+      // Fallback to chat history if no meeting context
+      if (!recent) {
+        recent = getRecentHistoryString(event.sender.id, 6);
+      }
+      
+      const seed = action?.type === 'say-next'
+        ? `Meeting Conversation (last 6 turns):\n${recent}\n\nBased on this conversation, provide ONE specific, actionable thing I should say next.`
+        : (action?.query || action?.text || '');
+
+      // Stream fake chunks for UX while fetching
+      const send = (type: string, content?: string) => {
+        mainWindow?.webContents.send('meeting-chat-stream', { chatId, type, content });
+      };
+
+      if (action?.type === 'say-next') {
+        // Better prompt for more specific suggestions
+        try {
+          const openaiKey = process.env.OPENAI_API_KEY;
+          if (openaiKey) {
+            const { default: OpenAI } = await import('openai');
+            const openai = new OpenAI({ apiKey: openaiKey } as any);
+            const completion = await openai.chat.completions.create({
+              model: 'gpt-4o-mini',
+              messages: [
+                { 
+                  role: 'system', 
+                  content: `You suggest exactly what someone should say next in a meeting. 
+
+Your response should be:
+- A complete sentence or question they can actually say
+- Specific and directly related to the last few exchanges
+- Move the conversation forward productively
+- Natural conversational language, not formal or robotic
+- ONE single response, not multiple options
+
+Examples of good responses:
+- "Could you clarify what the timeline looks like for the design phase?"
+- "I think we should prioritize the API integration first since that's blocking the frontend team."
+- "That makes sense. What resources do we need to make that happen?"
+- "Let me summarize what I heard: we're moving forward with option B, targeting mid-January. Is that correct?"
+
+Do NOT say things like "Consider asking..." or "You might want to..." - just provide the actual words to say.`
+                },
+                { role: 'user', content: seed }
+              ],
+              temperature: 0.5,
+              max_tokens: 100,
+            });
+            const text = completion.choices?.[0]?.message?.content?.trim() || 'Could you elaborate on that last point?';
+            // Remove any quotes from the response
+            const cleanText = text.replace(/^["']|["']$/g, '');
+            
+            // Stream it word by word for animation
+            const words = cleanText.split(' ');
+            let currentText = '';
+            
+            for (let i = 0; i < words.length; i++) {
+              currentText += (i > 0 ? ' ' : '') + words[i];
+              send('text', currentText);
+              await new Promise(resolve => setTimeout(resolve, 50)); // Small delay between words
+            }
+            
+            send('stream_end');
+          } else {
+            // Fallback deterministic text
+            send('text', 'What are the next steps we need to take to move this forward?');
+            send('stream_end');
+          }
+        } catch (err) {
+          console.warn('[MeetingChat] say-next failed:', err);
+          send('text', 'Ask for clarification on the last point and propose a next step.');
+          send('stream_end');
+        }
+        return;
+      }
+
+      // For search actions: use Gemini 2.5 Flash for fast, comprehensive responses
+      if (action?.type === 'search' && (action?.query || action?.text)) {
+        const searchQuery = action.query || action.text;
+        console.log('[MeetingChat] Processing search action with Gemini 2.5 Flash:', searchQuery);
+        
+        try {
+          // Try Gemini first for speed
+          const geminiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
+          if (geminiKey) {
+            const { GoogleGenerativeAI } = await import('@google/generative-ai');
+            const genAI = new GoogleGenerativeAI(geminiKey);
+            
+            // Use Gemini Flash Latest (2.5 equivalent) for speed and quality
+            const model = genAI.getGenerativeModel({ 
+              model: 'gemini-2.5-flash', // Latest Gemini Flash model (Dec 2024) 
+              generationConfig: {
+                temperature: 0.4,
+                maxOutputTokens: 1200, // Much longer responses
+                topK: 40,
+                topP: 0.95,
+              }
+            });
+            
+            const prompt = `You are performing a web search and providing comprehensive information.
+
+Search query: "${searchQuery}"
+
+Provide a detailed, informative response that covers:
+- Key facts and information
+- Relevant details and context
+- Practical insights or tips if applicable
+- Multiple perspectives if relevant
+
+Be thorough but well-organized. Use bullet points or sections where helpful.
+Write at least 3-4 paragraphs of substantial information.`;
+
+            // Stream the response for better UX
+            const result = await model.generateContentStream(prompt);
+            
+            let fullResponse = '';
+            for await (const chunk of result.stream) {
+              const chunkText = chunk.text();
+              if (chunkText) {
+                fullResponse += chunkText;
+                send('text', fullResponse);
+              }
+            }
+            
+            send('stream_end');
+            console.log('[MeetingChat] Gemini 2.5 Flash search response completed');
+            
+          } else {
+            // Fallback to OpenAI if no Gemini key
+            const openaiKey = process.env.OPENAI_API_KEY;
+            if (openaiKey) {
+              const { default: OpenAI } = await import('openai');
+              const openai = new OpenAI({ apiKey: openaiKey } as any);
+              
+              const stream = await openai.chat.completions.create({
+                model: 'gpt-4o-mini',
+                messages: [
+                  { 
+                    role: 'system', 
+                    content: `You are performing a web search. Provide comprehensive, detailed information.
+                    Write at least 3-4 substantial paragraphs covering all aspects of the query.` 
+                  },
+                  { 
+                    role: 'user', 
+                    content: `Search: "${searchQuery}"` 
+                  }
+                ],
+                temperature: 0.4,
+                max_tokens: 800,
+                stream: true,
+              });
+              
+              let fullResponse = '';
+              for await (const chunk of stream) {
+                const content = chunk.choices[0]?.delta?.content || '';
+                if (content) {
+                  fullResponse += content;
+                  send('text', fullResponse);
+                }
+              }
+              
+              send('stream_end');
+            } else {
+              send('text', `Configure GEMINI_API_KEY or OPENAI_API_KEY for search results.`);
+              send('stream_end');
+            }
+          }
+        } catch (err) {
+          console.error('[MeetingChat] Search failed:', err);
+          send('text', `Searching for information about "${searchQuery}"...`);
+          send('stream_end');
+        }
+        return;
+      }
+      
+      // For other generic actions
+      if (action?.query || action?.text) {
+        const q = action.query || action.text;
+        send('text', `Processing: ${q}`);
+        send('stream_end');
+        return;
+      }
+    } catch (e) {
+      console.error('[MeetingChat] Failed to start chat:', e);
     }
   });
 
@@ -717,24 +875,34 @@ User: ${userPrompt}`;
     // Virtual cursor management is now handled entirely by toggle-collab-mode
     // to prevent conflicts and mouse blocking issues
     
-    // AGENT MODE: delegate fully to Agent-S runner (no AppleScript, no visual-nav)
-    if (isAgentMode) {
+    // SILENT PRE-ASSESSMENT for agent mode (collaborative mode)
+    let preAssessment = null;
+    // Heuristic: simple open-only prompt (no chained actions)
+    const isOpenOnlyPrompt = /^(\s*)?(open|launch|start)\s+[^\s].*$/i.test(userPrompt) &&
+      !/(\band\b|\bthen\b|\bto\b|\bfor\b|\bwith\b|\bgo to\b|\bmake\b|\bcreate\b|\bcompose\b|\bbook\b|\babout\b|\bon\b|\bin\b)/i.test(userPrompt);
+    if (isAgentMode && !isOpenOnlyPrompt) {
       try {
-        const cursor = getVirtualCursor();
-        await cursor.create();
-        await cursor.show();
-        await runAgentS(userPrompt, event);
-        cursor.hide();
-        return;
+        console.log(`[MainHandlers] 🔍 Running silent pre-assessment for: "${userPrompt}"`);
+        // Take a quick screenshot for assessment
+        const logFolder = createLogFolder('pre-assessment');
+        const timestampFolder = path.join(logFolder, `${Date.now()}`);
+        if (!fs.existsSync(timestampFolder)) {
+          fs.mkdirSync(timestampFolder, { recursive: true });
+        }
+        const screenshotBase64 = await takeAndSaveScreenshots("Desktop", timestampFolder);
+        if (screenshotBase64) {
+          preAssessment = await geminiVision.silentScreenAssessment(screenshotBase64, userPrompt);
+          console.log(`[MainHandlers] 🔍 Assessment complete:`, {
+            currentApps: preAssessment.currentApps,
+            needsNavigation: preAssessment.needsNavigation,
+            targetApp: preAssessment.targetApp,
+            context: preAssessment.context
+          });
+        }
       } catch (assessmentError) {
-        console.error('[MainHandlers] Agent-S failed:', assessmentError);
-        try { getVirtualCursor().hide(); } catch {}
-        event.sender.send('reply', { type: 'error', message: 'Agent mode failed to start' });
-        return;
+        console.warn(`[MainHandlers] Pre-assessment failed, continuing normally:`, assessmentError);
       }
     }
-
-    // (Chat mode continues below)
     
     const history: AgentInputItem[] = [];
     let appName: string = "";
@@ -747,8 +915,48 @@ User: ${userPrompt}`;
         appName = "NONE"; // Don't try to detect any app in chat mode
         isOpenCommand = false;
       } else {
-        // Fallback to normal app detection
-        appName = await getAppName(userPrompt) || "NONE";
+        // Use pre-assessment to inform app detection (only in agent mode)
+        if (preAssessment && preAssessment.targetApp && preAssessment.needsNavigation) {
+          appName = preAssessment.targetApp;
+          isOpenCommand = true;
+          console.log(`[MainHandlers] 🔍 Using pre-assessment result: ${appName} (navigation needed)`);
+
+          // If this is a presentation task, prefer a browser workflow to Google Slides
+          const isPresentation = /\b(presentation|slides|slide deck|deck|ppt|keynote)\b/i.test(userPrompt);
+          if (isPresentation) {
+            const browser = await resolvePreferredBrowser();
+            console.log(`[MainHandlers] 🎯 Presentation task detected — routing via browser: ${browser}`);
+            appName = browser;
+            isOpenCommand = true;
+          } else {
+            // If the suggested app isn't installed, fallback to browser
+            try { await getBundleId(appName); }
+            catch {
+              const browser = await resolvePreferredBrowser();
+              console.log(`[MainHandlers] ⚠️ ${appName} not available — falling back to browser: ${browser}`);
+              appName = browser;
+              isOpenCommand = true;
+            }
+          }
+        } else if (preAssessment && !preAssessment.needsNavigation) {
+          appName = "NONE"; // Work with currently open apps
+          isOpenCommand = false;
+          console.log(`[MainHandlers] 🔍 Pre-assessment: No navigation needed, working with current apps`);
+        } else {
+          // Fallback to normal app detection
+          appName = await getAppName(userPrompt) || "NONE";
+
+          // If app detection failed but user intent is a presentation, choose a browser
+          if (appName === "NONE") {
+            const isPresentation = /\b(presentation|slides|slide deck|deck|ppt|keynote)\b/i.test(userPrompt);
+            if (isPresentation) {
+              const browser = await resolvePreferredBrowser();
+              console.log(`[MainHandlers] 🎯 Presentation task with unknown app — choosing browser: ${browser}`);
+              appName = browser;
+              isOpenCommand = true;
+            }
+          }
+        }
       }
       
       // Check if no app is needed (conversational/screen analysis message)
@@ -759,49 +967,385 @@ User: ${userPrompt}`;
           console.log('[MainHandlers] 💬 Chat mode with NONE app - skipping to fast assessment...');
           // Do nothing here - let it fall through to the chat mode logic below
         } else {
-          // Agent mode: Perform generic screen analysis via runActionAgentStreaming as before
+          // Agent mode: Enhanced logic with pre-assessment context
           const isScreenAnalysis = userPrompt.toLowerCase().includes("screen") || 
                                    userPrompt.toLowerCase().includes("see") ||
                                    userPrompt.toLowerCase().includes("what") ||
                                    userPrompt.toLowerCase().includes("describe") ||
                                    userPrompt.toLowerCase().includes("analyze") ||
                                    userPrompt.toLowerCase().includes("looking");
-          if (isScreenAnalysis) {
-            const mainLogFolder = createLogFolder(userPrompt);
-            const stepTimestamp = Date.now().toString();
-            const stepFolder = path.join(mainLogFolder, `${stepTimestamp}`);
-            if (!fs.existsSync(stepFolder)) {
-              fs.mkdirSync(stepFolder, { recursive: true });
+          
+          // If pre-assessment indicates we can work with current apps, treat as normal task
+          const shouldWorkWithCurrentApps = preAssessment && !preAssessment.needsNavigation && 
+                                           preAssessment.currentApps.length > 0;
+          
+          if (isScreenAnalysis && !shouldWorkWithCurrentApps) {
+          // Perform screen analysis without requiring specific app
+          const mainLogFolder = createLogFolder(userPrompt);
+          const stepTimestamp = Date.now().toString();
+          const stepFolder = path.join(mainLogFolder, `${stepTimestamp}`);
+          if (!fs.existsSync(stepFolder)) {
+            fs.mkdirSync(stepFolder, { recursive: true });
+          }
+          
+          try {
+            // Take screenshot for analysis
+            const screenshotBase64 = await takeAndSaveScreenshots("Desktop", stepFolder);
+            console.log('[MainHandlers] Screenshot captured, base64 length:', screenshotBase64?.length || 0);
+            
+            // Use the action agent to analyze the screen
+            const streamGenerator = runActionAgentStreaming(
+              "Desktop",
+              userPrompt,
+              [], // No clickable elements needed for analysis
+              history,
+              screenshotBase64,
+              stepFolder,
+              async (_toolName: string, _args: string) => {
+                // For screen analysis, we don't need to execute tools
+                return "Analysis complete";
+              },
+              isAgentMode
+            );
+
+            // Stream the analysis response
+            console.log('[MainHandlers] Starting to stream screen analysis...');
+            for await (const chunk of streamGenerator) {
+              console.log('[MainHandlers] Received chunk:', chunk);
+              if (chunk.type === "text") {
+                event.sender.send("stream", {
+                  type: "text",
+                  content: chunk.content
+                });
+              } else if (chunk.type === "tool_call") {
+                // Skip tool calls for analysis
+                continue;
+              } else if (chunk.type === "done") {
+                event.sender.send("stream", {
+                  type: "stream_end",
+                  content: chunk.content
+                });
+                return;
+              }
             }
+            
+            // After streaming is complete
+            const analysisComplete = "I've analyzed your screen!";
+            event.sender.send("reply", {
+              type: "success",
+              message: analysisComplete
+            });
+            
+            // Notify frontend that streaming is done
+            event.sender.send("stream", {
+              type: "stream_end"
+            });
+            
+            console.log('[MainHandlers] Screen analysis complete');
+            return;
+          } catch (error) {
+            console.error('[MainHandlers] Error during screen analysis:', error);
+            event.sender.send("reply", {
+              type: "error",
+              message: "Failed to analyze screen: " + error
+            });
+            return;
+          }
+        } else if (shouldWorkWithCurrentApps && preAssessment) {
+          // Pre-assessment indicates we can work with current apps (e.g., "help with presentation" when PowerPoint is open)
+          console.log(`[MainHandlers] 🔍 Working with current apps based on pre-assessment:`, preAssessment.currentApps);
+          
+          // Prefer explicitly requested app if present (e.g., "Open Chrome")
+          let mainApp = preAssessment.currentApps[0] || "Desktop";
+          try {
+            const explicitApp = await getAppName(userPrompt);
+            if (explicitApp) {
+              mainApp = explicitApp;
+              console.log(`[MainHandlers] ✅ Using explicitly requested app: ${mainApp}`);
+            }
+          } catch {}
+          
+          // Resolve bundle id for the chosen app
+          let bundleIdForMainApp = "";
+          try {
+            bundleIdForMainApp = await getBundleId(mainApp);
+            console.log(`[MainHandlers] 🔗 Resolved bundle id for ${mainApp}: ${bundleIdForMainApp}`);
+          } catch (e) {
+            console.warn(`[MainHandlers] ⚠️ Could not resolve bundle id for ${mainApp}:`, e);
+          }
+          
+          // Process the prompt normally but with current app context
+          const mainLogFolder = createLogFolder(userPrompt);
+          const stepTimestamp = Date.now().toString();
+          const stepFolder = path.join(mainLogFolder, `${stepTimestamp}`);
+          if (!fs.existsSync(stepFolder)) {
+            fs.mkdirSync(stepFolder, { recursive: true });
+          }
+          
+          try {
+            // Take screenshot for context
+            const screenshotBase64 = await takeAndSaveScreenshots("Desktop", stepFolder);
+            console.log('[MainHandlers] Screenshot captured for current app work, base64 length:', screenshotBase64?.length || 0);
+            
+            // Get clickable elements for the target app (requires bundle id)
+            let clickableElements: Element[] = [];
+            if (bundleIdForMainApp) {
+              try {
+                const result = await getClickableElements(bundleIdForMainApp, stepFolder);
+                clickableElements = result.clickableElements;
+                console.log(`[MainHandlers] Found ${clickableElements.length} clickable elements in ${mainApp}`);
+              } catch (error) {
+                console.warn(`[MainHandlers] Could not get clickable elements for ${mainApp}:`, error);
+              }
+            }
+            
+            // Use the action agent with full context
+            const contextApp = mainApp;
+            const streamGenerator = runActionAgentStreaming(
+              contextApp,
+              userPrompt,
+              clickableElements,
+              history,
+              screenshotBase64,
+              stepFolder,
+              async (toolName: string, args: string) => {
+                // Execute tool call with proper arguments
+                const actionResult = await performAction(
+                  `=${toolName}\n${args}`,
+                  bundleIdForMainApp || contextApp,
+                  clickableElements,
+                  event,
+                  isAgentMode
+                );
+                
+                let resultText = "";
+                if (Array.isArray(actionResult)) {
+                  const firstResult = actionResult[0];
+                  if (firstResult && "type" in firstResult && (firstResult as any).type === "unknown tool") {
+                    resultText = "Error: unknown tool";
+                  } else if (firstResult && "error" in (firstResult as any) && (firstResult as any).error) {
+                    resultText = `Error: ${(firstResult as any).error}`;
+                  } else {
+                    resultText = "Action completed";
+                  }
+                } else if (actionResult && (actionResult as any).error) {
+                  resultText = `Error: ${(actionResult as any).error}`;
+                } else {
+                  resultText = "Action completed";
+                }
+                
+                return resultText;
+              },
+              isAgentMode
+            );
+
+            // Stream the response
+            console.log('[MainHandlers] Starting to stream current app interaction...');
+            for await (const chunk of streamGenerator) {
+              console.log('[MainHandlers] Received chunk:', chunk);
+              if (chunk.type === "text") {
+                event.sender.send("stream", {
+                  type: "text",
+                  content: chunk.content
+                });
+              } else if (chunk.type === "tool_call") {
+                // Tool calls are handled by performAction
+                continue;
+              } else if (chunk.type === "done") {
+                event.sender.send("stream", {
+                  type: "stream_end",
+                  content: chunk.content
+                });
+                return;
+              }
+            }
+            
+            console.log('[MainHandlers] Current app interaction complete');
+            return;
+          } catch (error) {
+            console.error('[MainHandlers] Error during current app interaction:', error);
+            event.sender.send("reply", {
+              type: "error",
+              message: "Failed to interact with current apps: " + error
+            });
+            return;
+          }
+        } else {
+          // General conversational handling
+          if (isChatMode) {
+            // Fast two-step approach for chat mode
+                         console.log('[MainHandlers] 💬 Chat mode: Starting fast response...', 'Prompt:', userPrompt);
+            
+            // Step 1: Quick Gemini 2.5 Flash check (no screenshot) - should be ~1-2 seconds
+            const { GoogleGenerativeAI } = await import("@google/generative-ai");
+            const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
+            const fastModel = genAI.getGenerativeModel({ 
+              model: "gemini-2.5-flash",
+              generationConfig: {
+                temperature: 0.7,
+                maxOutputTokens: 800, // Reasonable response length for speed
+              }
+            });
+
+                         const analysisPrompt = `The user says: "${userPrompt}"
+
+TASK: Determine if this requires seeing the user's screen to answer properly.
+
+Respond with exactly this format:
+SCREENSHOT_NEEDED: [YES/NO]
+REASON: [brief reason]
+
+Examples:
+- "Hi" or "Hello" → NO (general greeting)
+- "What's on my screen?" → YES (explicitly asking about screen)
+- "Explain this error" → YES (likely referring to something on screen)  
+- "How do I code in Python?" → NO (general knowledge question)
+- "What does this mean?" → YES (likely referring to something visible)
+- "Tell me a joke" → NO (general request)`;
+
             try {
-              const screenshotBase64 = await takeAndSaveScreenshots("Desktop", stepFolder);
-              const streamGenerator = runActionAgentStreaming(
-                "Desktop",
-                userPrompt,
-                [],
-                history,
-                screenshotBase64,
-                stepFolder,
-                async () => "Analysis complete",
-                isAgentMode
-              );
-              for await (const chunk of streamGenerator) {
-                if (chunk.type === "text") {
-                  event.sender.send("stream", { type: "text", content: chunk.content });
-                } else if (chunk.type === "done") {
-                  event.sender.send("stream", { type: "stream_end" });
-                  return;
+              const senderId = event.sender.id;
+              const recentHistory = getRecentHistoryString(senderId, 4);
+              appendToHistory(senderId, 'user', userPrompt);
+              const analysisResult = await fastModel.generateContent(analysisPrompt);
+              const analysisText = analysisResult.response.text();
+              
+              const needsScreenshot = analysisText.includes('SCREENSHOT_NEEDED: YES');
+
+               console.log(`[MainHandlers] 💬 Analysis complete - Screenshot needed: ${needsScreenshot}`);
+
+              if (needsScreenshot) {
+                // Step 2: Take screenshot and do full analysis
+                console.log('[MainHandlers] 💬 Taking screenshot for visual analysis...');
+                const mainLogFolder = createLogFolder(userPrompt);
+                const stepTimestamp = Date.now().toString();
+                const stepFolder = path.join(mainLogFolder, `${stepTimestamp}`);
+                if (!fs.existsSync(stepFolder)) {
+                  fs.mkdirSync(stepFolder, { recursive: true });
+                }
+
+                let screenshotBase64: string | undefined;
+                try {
+                  screenshotBase64 = await takeAndSaveScreenshots("Desktop", stepFolder);
+                } catch (e) {
+                  console.warn('[MainHandlers] Screenshot failed, using text-only response');
+                }
+
+                // Use Gemini 2.5 Flash for full analysis with screenshot
+                const chatPrompt = `You are in Chat mode. The user asks: "${userPrompt}"
+
+${screenshotBase64 ? 'I can see the user\'s screen. ' : ''}Please provide a helpful response. Be conversational and natural.
+
+Recent conversation:
+${recentHistory || '(none)'}
+
+${screenshotBase64 ? 'Analyze what\'s visible on the screen and answer their question.' : 'Answer based on the context of their question.'}`;
+
+                const chatSession = fastModel.startChat();
+                const contentParts: any[] = [{ text: chatPrompt }];
+                if (screenshotBase64) {
+                  contentParts.push({
+                    inlineData: {
+                      mimeType: "image/png",
+                      data: screenshotBase64
+                    }
+                  });
+                }
+
+                let fullAssistant = '';
+                                 const result = await chatSession.sendMessageStream(contentParts);
+                 
+                 // Stream the response
+                 for await (const chunk of result.stream) {
+                   const chunkText = chunk.text();
+                   if (chunkText) {
+                     event.sender.send("stream", { type: "text", content: chunkText });
+                     fullAssistant += chunkText;
+                   }
+                 }
+                 event.sender.send("stream", { type: "stream_end" });
+                 if (fullAssistant.trim()) {
+                   appendToHistory(senderId, 'assistant', fullAssistant.trim());
+                 }
+              } else {
+                // Step 2: Always generate a proper conversational response (no screenshot needed)
+                console.log('[MainHandlers] 💬 No screenshot needed, generating conversational response...');
+                
+                const chatPrompt = `You are in Chat mode. Have a natural conversation with the user. Be helpful and friendly. Be concise when appropriate, but provide detailed responses when they would be more helpful.
+
+Recent conversation:
+${recentHistory || '(none)'}
+
+User: ${userPrompt}`;
+
+                console.log('[MainHandlers] 💬 Streaming Gemini 2.5 Flash conversational response...');
+                                 const result = await fastModel.generateContentStream(chatPrompt);
+
+                 let fullAssistant = '';
+                 for await (const chunk of result.stream) {
+                   const chunkText = chunk.text();
+                   if (chunkText) {
+                     event.sender.send('stream', { type: 'text', content: chunkText });
+                     fullAssistant += chunkText;
+                   }
+                 }
+                 event.sender.send('stream', { type: 'stream_end' });
+                 if (fullAssistant.trim()) {
+                   appendToHistory(senderId, 'assistant', fullAssistant.trim());
+                 }
+              }
+
+            } catch (error) {
+              console.error('[MainHandlers] Chat mode error:', error);
+              event.sender.send("reply", {
+                type: "error", 
+                message: "Sorry, I had trouble processing your message. Please try again."
+              });
+            }
+
+          } else {
+            // Agent mode - use LLM for greeting (no hardcoded messages!)
+            console.log('[MainHandlers] 🤖 Agent mode: Generating LLM greeting...');
+            
+            try {
+              const { GoogleGenerativeAI } = await import("@google/generative-ai");
+              const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
+              const agentModel = genAI.getGenerativeModel({ 
+                model: "gemini-2.5-flash",
+                generationConfig: {
+                  temperature: 0.7,
+                  maxOutputTokens: 200, // Keep greetings concise
+                }
+              });
+
+              const agentPrompt = `You are in Agent mode - you can help with tasks and perform actions on the computer. The user just opened the agent interface.
+
+Provide a friendly greeting that invites them to ask for help with tasks. Be welcoming and natural.`;
+
+              console.log('[MainHandlers] 🤖 Streaming agent greeting...');
+              const result = await agentModel.generateContentStream(agentPrompt);
+              
+              for await (const chunk of result.stream) {
+                const chunkText = chunk.text();
+                if (chunkText) {
+                  console.log('[MainHandlers] 🤖 Agent greeting chunk:', chunkText.substring(0, 50) + '...');
+                  event.sender.send("stream", { type: "text", content: chunkText });
                 }
               }
-              event.sender.send("reply", { type: "success", message: "Screen analysis complete" });
+              console.log('[MainHandlers] 🤖 Agent greeting complete');
               event.sender.send("stream", { type: "stream_end" });
-              return;
+
             } catch (error) {
-              event.sender.send("reply", { type: "error", message: "Failed to analyze screen: " + error });
-              return;
+              console.error('[MainHandlers] Agent greeting error:', error);
+              event.sender.send("reply", {
+                type: "error", 
+                message: "I'm ready to help! What can I do for you?"
+              });
             }
           }
         }
+        } // Close the else block for agent mode
+        return;
       }
       
       // Only open the app if NOT in collaborative mode or NOT an open command
@@ -816,20 +1360,36 @@ User: ${userPrompt}`;
         return;
       }
       
-      // In agent mode for "open" commands, route entirely through Agent-S runner (no AppleScript, no visual-nav)
+      // In agent mode for "open" commands, execute directly with visual navigation
       if (isAgentMode && isOpenCommand) {
-        console.log(`[MainHandlers] Collaborative mode: Routing to Agent-S for: ${userPrompt}`);
+        console.log(`[MainHandlers] Collaborative mode: Using visual navigation to open ${appName}`);
+        
         try {
+          // Show virtual cursor for the session
           const cursor = getVirtualCursor();
           await cursor.create();
           await cursor.show();
-          await runAgentS(userPrompt, event);
-          cursor.hide();
+          
+                // Start visual navigation loop (uses Dock AX + Spotlight fallback)
+      await performVisualNavigation(appName, cursor, event);
+      // For a simple open-only prompt, stop here — do not run the action agent
+      if (isOpenOnlyPrompt) {
+        return;
+      }
+      // Otherwise, continue the original task with the agent inside the opened app
+          try {
+            await runAgentInApp(appName, userPrompt, history, event, isAgentMode);
+          } catch (e) {
+            console.warn('[MainHandlers] Post-open agent run failed:', e);
+          }
           return;
+          
         } catch (error) {
-          console.error(`[MainHandlers] Agent-S error:`, error);
-          try { getVirtualCursor().hide(); } catch {}
-          event.sender.send("reply", { type: "error", message: `Agent-S failed: ${error}` });
+          console.error(`[MainHandlers] Error in visual navigation:`, error);
+          event.sender.send("reply", {
+            type: "error",
+            message: `Failed to open ${appName}: ${error}`,
+          });
           return;
         }
       }
@@ -875,6 +1435,16 @@ User: ${userPrompt}`;
     }
     const mainLogFolder = createLogFolder(userPrompt);
     console.log("\n");
+
+    // Planning path for multi-step tasks in agent mode
+    if (isAgentMode) {
+      const plan = buildPlanForTask(userPrompt);
+      if (plan) {
+        console.log(`[MainHandlers] Executing structured plan for: ${userPrompt}`);
+        await executePlan(plan, event, history, isAgentMode);
+        return;
+      }
+    }
 
     let done = false;
     while (!done) {
@@ -1121,6 +1691,18 @@ Do NOT describe the screen. Do NOT add anything else. Just use the exact format 
         });
       }, 50);
     }
+
+    
+
+    // Planning path for multi-step tasks in agent mode
+    if (isAgentMode) {
+      const plan = buildPlanForTask(userPrompt);
+      if (plan) {
+        console.log(`[MainHandlers] Executing structured plan for: ${userPrompt}`);
+        await executePlan(plan, event, history, isAgentMode);
+        return;
+      }
+    }
   });
 
   // Toggle click-through based on chat input focus/blur
@@ -1258,16 +1840,14 @@ Do NOT describe the screen. Do NOT add anything else. Just use the exact format 
   });
 
   // Perform a web search in the user's default browser for an action item
-  ipcMain.on('perform-search', (_evt, rawQuery: string) => {
+  ipcMain.on('perform-search', async (_evt, query: string) => {
     try {
-      const query = (rawQuery || '').toString().trim();
-      if (!query) return;
-      const encoded = encodeURIComponent(query);
-      const url = `https://www.google.com/search?q=${encoded}`;
+      const url = `https://www.google.com/search?q=${encodeURIComponent(query || '')}`;
       // @ts-ignore
-      import('electron').then(({ shell }) => shell.openExternal(url));
+      const { shell } = await import('electron');
+      shell.openExternal(url);
     } catch (err) {
-      console.error('[MainHandlers] Failed to perform search:', err);
+      console.error('[MainHandlers] perform-search error:', err);
     }
   });
 
@@ -1283,6 +1863,26 @@ async function performVisualNavigation(appName: string, cursor: ReturnType<typeo
 
   console.log(`[VisualNav] Starting visual navigation to open ${appName}`);
 
+  // Early exit: if app already frontmost, treat as success
+  if (await isAppFrontmost(appName)) {
+    console.log(`[VisualNav] ${appName} already frontmost — goal achieved`);
+    return;
+  }
+
+  // FIRST: Always try Dock click via Accessibility before anything else
+  console.log(`[VisualNav] Trying direct Dock click first for ${appName}...`);
+  const directDockClicked = await clickDockItemIfAvailable(appName, cursor);
+  if (directDockClicked) {
+    // Verify app opened
+    for (let i = 0; i < 5; i++) {
+      if (await isAppFrontmost(appName) || await isAppVisible(appName)) {
+        console.log(`[VisualNav] ${appName} opened via direct Dock click!`);
+        return;
+      }
+      await new Promise(r => setTimeout(r, 300));
+    }
+  }
+
   while (attempt < maxAttempts && !goalAchieved) {
     attempt++;
     console.log(`[VisualNav] Attempt ${attempt}/${maxAttempts}`);
@@ -1290,9 +1890,18 @@ async function performVisualNavigation(appName: string, cursor: ReturnType<typeo
     // First, try to click the Dock item deterministically via Accessibility
     const axClicked = await clickDockItemIfAvailable(appName, cursor);
     if (axClicked) {
-      console.log(`[VisualNav] [AX] ${appName} clicked via Dock successfully`);
-      goalAchieved = true;
-      break;
+      // Confirm app appears with at least one window or frontmost within a short timeout
+      for (let i = 0; i < 5; i++) {
+        if (await isAppFrontmost(appName) || await isAppVisible(appName)) {
+          goalAchieved = true;
+          break;
+        }
+        await new Promise(r => setTimeout(r, 300));
+      }
+      if (goalAchieved) {
+        console.log(`[VisualNav] ${appName} detected open/frontmost after Dock click`);
+        break;
+      }
     }
 
     // Take current screenshot
@@ -1368,7 +1977,7 @@ Provide ONLY the action and coordinates. Be precise.`;
         goalAchieved = true;
         
       } else if (aiResponse.includes("CLICK_DOCK:")) {
-        // Ignore AI's dock coords and use Accessibility to resolve Dock item frame reliably
+        // Prefer Accessibility to resolve Dock item frame reliably
         const resolved = await geminiVision.getDockItemFrame(appName);
         if (resolved.found && typeof resolved.centerX === 'number' && typeof resolved.centerY === 'number') {
           const x = resolved.centerX!;
@@ -1379,27 +1988,96 @@ Provide ONLY the action and coordinates. Be precise.`;
           await cursor.performClick({ x, y });
           await new Promise(resolve => setTimeout(resolve, 1200));
         } else {
-          // Fallback to Spotlight path
-          const screenWidth = screen.getPrimaryDisplay().bounds.width;
-          const spotlightX = Math.min(screenWidth - 50, 1280);
-          const spotlightY = 25;
-          console.warn(`[VisualNav] Dock item not found via AX; falling back to Spotlight at (${spotlightX}, ${spotlightY})`);
-          await cursor.moveCursor({ x: spotlightX, y: spotlightY });
-          await new Promise(resolve => setTimeout(resolve, 150));
-          await cursor.performClick({ x: spotlightX, y: spotlightY });
-          await new Promise(resolve => setTimeout(resolve, 200));
-          await runAppleScript(`tell application \"System Events\" to keystroke space using command down`);
-          await new Promise(resolve => setTimeout(resolve, 600));
-          await runAppleScript(`tell application \"System Events\" to keystroke \"${appName}\"`);
-          await new Promise(resolve => setTimeout(resolve, 300));
-          await runAppleScript(`tell application \"System Events\" to keystroke return`);
-          await new Promise(resolve => setTimeout(resolve, 1200));
+          // If AX is unavailable (e.g., AccessibilityNotTrusted), try AI-provided coordinates
+          const dockMatch = aiResponse.match(/CLICK_DOCK:\s*\{?\s*(-?\d+)\s*,\s*(-?\d+)\s*\}?/);
+          if (dockMatch) {
+            let x = parseInt(dockMatch[1], 10);
+            let y = parseInt(dockMatch[2], 10);
+
+            // If y is extremely close to the bottom edge (common with mispredictions),
+            // adjust upward by a small dynamic margin so we click within the icon area.
+            try {
+              const display = screen.getPrimaryDisplay();
+              const screenHeight = display.bounds.height;
+              const bottomMargin = Math.max(28, Math.round(screenHeight * 0.05)); // ~5% of height, min 28px
+              if (y > screenHeight - bottomMargin) {
+                const adjustedY = screenHeight - bottomMargin;
+                console.log(`[VisualNav] Adjusting Dock Y from ${y} to ${adjustedY} to avoid bottom edge misclick`);
+                y = adjustedY;
+              }
+            } catch {}
+
+            console.log(`[VisualNav] AX unavailable or not found. Using AI-provided Dock coords (${x}, ${y})`);
+            await cursor.moveCursor({ x, y });
+            await new Promise(resolve => setTimeout(resolve, 200));
+            await cursor.performClick({ x, y });
+            await new Promise(resolve => setTimeout(resolve, 800));
+            // Verify
+            for (let i = 0; i < 5; i++) {
+              if (await isAppFrontmost(appName) || await isAppVisible(appName)) {
+                goalAchieved = true;
+                break;
+              }
+              await new Promise(r => setTimeout(r, 250));
+            }
+
+            // If still not open, try a second click at the same location (sometimes first click focuses Dock)
+            if (!goalAchieved) {
+              console.log('[VisualNav] First Dock click did not open app; retrying click');
+              await cursor.performClick({ x, y });
+              await new Promise(resolve => setTimeout(resolve, 1000));
+              for (let i = 0; i < 5; i++) {
+                if (await isAppFrontmost(appName) || await isAppVisible(appName)) {
+                  goalAchieved = true;
+                  break;
+                }
+                await new Promise(r => setTimeout(r, 250));
+              }
+            }
+
+            if (goalAchieved) { break; }
+          }
+          if (!goalAchieved) {
+            // Final fallback to Spotlight path
+            const display = screen.getPrimaryDisplay();
+            const screenWidth = display.bounds.width;
+            const spotlightX = screenWidth - 50;
+            const spotlightY = 25;
+            console.warn(`[VisualNav] Dock item not found via AX and AI coords did not achieve goal; falling back to Spotlight at (${spotlightX}, ${spotlightY})`);
+            await cursor.moveCursor({ x: spotlightX, y: spotlightY });
+            await new Promise(resolve => setTimeout(resolve, 150));
+            await cursor.performClick({ x: spotlightX, y: spotlightY });
+            await new Promise(resolve => setTimeout(resolve, 200));
+            await runAppleScript(`tell application \"System Events\" to keystroke space using command down`);
+            await new Promise(resolve => setTimeout(resolve, 600));
+            await runAppleScript(`tell application \"System Events\" to keystroke \"${appName}\"`);
+            await new Promise(resolve => setTimeout(resolve, 300));
+            await runAppleScript(`tell application \"System Events\" to keystroke return`);
+            await new Promise(resolve => setTimeout(resolve, 1200));
+            for (let i = 0; i < 5; i++) {
+              if (await isAppFrontmost(appName) || await isAppVisible(appName)) {
+                goalAchieved = true;
+                break;
+              }
+              await new Promise(r => setTimeout(r, 300));
+            }
+            if (goalAchieved) { break; }
+          }
         }
       } else if (aiResponse.includes("CLICK_SPOTLIGHT:")) {
-        // Use dynamic Spotlight position (top-right corner)
-        const screenWidth = screen.getPrimaryDisplay().bounds.width;
-        const spotlightX = Math.min(screenWidth - 50, 1280); // Adapt to screen size
-        const spotlightY = 25;
+        // Parse coordinates if provided, otherwise compute dynamic top-right
+        const spotlightMatch = aiResponse.match(/CLICK_SPOTLIGHT:\s*\{?\s*(-?\d+)\s*,\s*(-?\d+)\s*\}?/);
+        let spotlightX: number;
+        let spotlightY: number;
+        if (spotlightMatch) {
+          spotlightX = parseInt(spotlightMatch[1], 10);
+          spotlightY = parseInt(spotlightMatch[2], 10);
+        } else {
+          const display = screen.getPrimaryDisplay();
+          const screenWidth = display.bounds.width;
+          spotlightX = screenWidth - 50;  // 50px from right edge
+          spotlightY = 25;                // 25px from top
+        }
         
         // Before opening Spotlight, try AX-based Dock click again in case Dock is visible but model missed it
         const axClicked = await clickDockItemIfAvailable(appName, cursor);
@@ -1408,22 +2086,42 @@ Provide ONLY the action and coordinates. Be precise.`;
           continue;
         }
         
-        console.log(`[VisualNav] Opening Spotlight at dynamic position (${spotlightX}, ${spotlightY})`);
-        
+        console.log(`[VisualNav] Opening Spotlight at (${spotlightX}, ${spotlightY})`);
         await cursor.moveCursor({ x: spotlightX, y: spotlightY });
         await new Promise(resolve => setTimeout(resolve, 150));
-        // Perform an actual click where Spotlight icon is, to focus menu bar area
         await cursor.performClick({ x: spotlightX, y: spotlightY });
         await new Promise(resolve => setTimeout(resolve, 200));
-        
-        // Execute Spotlight shortcut
         await runAppleScript(`tell application \"System Events\" to keystroke space using command down`);
-        await new Promise(resolve => setTimeout(resolve, 600)); // let Spotlight animate in
-        // Type the target app and press Return
+        await new Promise(resolve => setTimeout(resolve, 600));
         await runAppleScript(`tell application \"System Events\" to keystroke \"${appName}\"`);
         await new Promise(resolve => setTimeout(resolve, 300));
         await runAppleScript(`tell application \"System Events\" to keystroke return`);
         await new Promise(resolve => setTimeout(resolve, 1200));
+        for (let i = 0; i < 5; i++) {
+          if (await isAppFrontmost(appName) || await isAppVisible(appName)) {
+            goalAchieved = true;
+            break;
+          }
+          await new Promise(r => setTimeout(r, 300));
+        }
+        if (goalAchieved) { break; }
+      } else if (aiResponse.includes("CLICK_LAUNCHPAD:")) {
+        try {
+          const coordsMatch = aiResponse.match(/CLICK_LAUNCHPAD:\s*\{?\s*(-?\d+)\s*,\s*(-?\d+)\s*\}?/);
+          if (coordsMatch) {
+            const x = parseInt(coordsMatch[1], 10);
+            const y = parseInt(coordsMatch[2], 10);
+            console.log(`[VisualNav] Clicking Launchpad at (${x}, ${y})`);
+            await cursor.moveCursor({ x, y });
+            await new Promise(resolve => setTimeout(resolve, 150));
+            await cursor.performClick({ x, y });
+            await new Promise(resolve => setTimeout(resolve, 800)); // wait for launchpad to open
+          } else {
+            console.warn('[VisualNav] Could not parse coordinates from CLICK_LAUNCHPAD response');
+          }
+        } catch (e) {
+          console.error('[VisualNav] Error executing CLICK_LAUNCHPAD:', e);
+        }
       }
       
     } catch (error) {
@@ -1454,26 +2152,30 @@ Provide ONLY the action and coordinates. Be precise.`;
     } catch (nativeErr) {
       console.error(`[VisualNav] Native open fallback failed:`, nativeErr);
       event.sender.send("reply", {
-        type: "error", 
+        type: "error",
         message: `Could not visually navigate to open ${appName}`,
       });
     }
   }
-   
-   // Hide cursor
-   cursor.hide();
-   
-   // Note: No continuous monitoring - screenshots taken only when needed
-   
-   console.log(`[VisualNav] Visual navigation session ended`);
- }
- 
- }
+
+  console.log(`[VisualNav] Visual navigation session ended`);
+}
 
 // Helper: Try to click Dock item via Accessibility (no hardcoded coords)
 async function clickDockItemIfAvailable(appName: string, cursor: ReturnType<typeof getVirtualCursor>): Promise<boolean> {
   try {
+    console.log(`[AX] Attempting to resolve Dock item for ${appName}`);
     const resolved = await geminiVision.getDockItemFrame(appName);
+    console.log(`[AX] Resolved Dock item result:`, resolved);
+    if (resolved.error === 'AccessibilityNotTrusted') {
+      // Notify renderer to show a permission prompt
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('permission-warning', {
+          type: 'accessibility',
+          message: 'Enable Accessibility permissions for Opus to click the Dock reliably. Open System Settings → Privacy & Security → Accessibility, then add and enable Opus.'
+        });
+      }
+    }
     if (resolved.found && typeof resolved.centerX === 'number' && typeof resolved.centerY === 'number') {
       const x = resolved.centerX!;
       const y = resolved.centerY!;
@@ -1482,9 +2184,11 @@ async function clickDockItemIfAvailable(appName: string, cursor: ReturnType<type
       await new Promise(r => setTimeout(r, 200));
       await cursor.performClick({ x, y });
       await new Promise(r => setTimeout(r, 300));
-      // Basic AppleScript to activate app (user preference)
-      await runAppleScript(`tell application "${appName}" to activate`);
-      await new Promise(r => setTimeout(r, 900));
+      // Only activate if not already frontmost to avoid minimize flicker
+      if (!(await isAppFrontmost(appName))) {
+        await runAppleScript(`tell application "${appName}" to activate`);
+        await new Promise(r => setTimeout(r, 700));
+      }
       return true;
     }
   } catch (e) {
@@ -1493,57 +2197,192 @@ async function clickDockItemIfAvailable(appName: string, cursor: ReturnType<type
   return false;
 }
 
-async function runAgentS(query: string, event: any) {
-  // Spawn the Agent-S bridge
-  const pyPath = path.join(process.cwd(), "python", "agent_s_bridge.py");
-  const child = spawn("python3", [pyPath], { cwd: process.cwd() });
+// Run the general action agent inside a target app
+async function runAgentInApp(
+  appName: string,
+  userPrompt: string,
+  history: AgentInputItem[],
+  event: any,
+  isAgentMode: boolean
+): Promise<void> {
+  let bundleIdForMainApp = "";
+  try {
+    bundleIdForMainApp = await getBundleId(appName);
+    console.log(`[MainHandlers] 🔗 Resolved bundle id for ${appName}: ${bundleIdForMainApp}`);
+  } catch (e) {
+    console.warn(`[MainHandlers] ⚠️ Could not resolve bundle id for ${appName}:`, e);
+  }
 
-  // Stream lines
-  child.stdout.setEncoding("utf8");
-  child.stderr.setEncoding("utf8");
+  const mainLogFolder = createLogFolder(userPrompt);
+  const stepTimestamp = Date.now().toString();
+  const stepFolder = path.join(mainLogFolder, `${stepTimestamp}`);
+  if (!fs.existsSync(stepFolder)) {
+    fs.mkdirSync(stepFolder, { recursive: true });
+  }
 
-  child.stderr.on("data", (d) => {
-    console.log(`[AgentS][stderr] ${d.toString()}`);
-  });
+  try {
+    const screenshotBase64 = await takeAndSaveScreenshots("Desktop", stepFolder);
+    console.log('[MainHandlers] Screenshot captured for agent task, base64 length:', screenshotBase64?.length || 0);
 
-  child.stdout.on("data", (chunk) => {
-    const lines = chunk.toString().split(/\r?\n/).filter(Boolean);
-    for (const line of lines) {
+    let clickableElements: Element[] = [];
+    if (bundleIdForMainApp) {
       try {
-        const msg = JSON.parse(line);
-        // Forward minimal status to UI
-        event.sender.send("stream", { type: "text", content: JSON.stringify(msg) + "\n" });
-      } catch {
-        console.log(`[AgentS] ${line}`);
+        const result = await getClickableElements(bundleIdForMainApp, stepFolder);
+        clickableElements = result.clickableElements;
+        console.log(`[MainHandlers] Found ${clickableElements.length} clickable elements in ${appName}`);
+      } catch (error) {
+        console.warn(`[MainHandlers] Could not get clickable elements for ${appName}:`, error);
       }
     }
-  });
 
-  // Initialize
-  const initMsg = {
-    type: "init",
-    provider: process.env.AGENT_S_PROVIDER || "openai",
-    model: process.env.AGENT_S_MODEL || "gpt-4o",
-    model_url: process.env.AGENT_S_MODEL_URL || "",
-    model_api_key: process.env.OPENAI_API_KEY || "",
-    // Grounding model (self-hosted) config — must be set by user env
-    ground_provider: process.env.AGENT_S_GROUND_PROVIDER || "openai",
-    ground_url: process.env.AGENT_S_GROUND_URL || "",
-    ground_api_key: process.env.AGENT_S_GROUND_API_KEY || "",
-    ground_model: process.env.AGENT_S_GROUND_MODEL || "gpt-4o-mini",
-    grounding_width: Number(process.env.AGENT_S_GROUND_W || 1920),
-    grounding_height: Number(process.env.AGENT_S_GROUND_H || 1080),
-    max_trajectory_length: 8,
-    enable_reflection: true,
-  };
-  child.stdin.write(JSON.stringify(initMsg) + "\n");
+    const streamGenerator = runActionAgentStreaming(
+      appName,
+      userPrompt,
+      clickableElements,
+      history,
+      screenshotBase64,
+      stepFolder,
+      async (toolName: string, args: string) => {
+        const actionResult = await performAction(
+          `=${toolName}\n${args}`,
+          bundleIdForMainApp || appName,
+          clickableElements,
+          event,
+          isAgentMode
+        );
+        let resultText = "";
+        if (Array.isArray(actionResult)) {
+          const first = actionResult[0] as any;
+          if (first?.error) resultText = `Error: ${first.error}`; else resultText = "Action completed";
+        } else if ((actionResult as any)?.error) {
+          resultText = `Error: ${(actionResult as any).error}`;
+        } else {
+          resultText = "Action completed";
+        }
+        return resultText;
+      },
+      isAgentMode
+    );
 
-  // Run query
-  const runMsg = { type: "run", query };
-  child.stdin.write(JSON.stringify(runMsg) + "\n");
-
-  return new Promise<void>((resolve) => {
-    child.on("close", () => resolve());
-  });
+    console.log('[MainHandlers] Starting to stream agent task...');
+    for await (const chunk of streamGenerator) {
+      if (chunk.type === "text") {
+        event.sender.send("stream", { type: "text", content: chunk.content });
+      } else if ((chunk as any).type === "done") {
+        event.sender.send("stream", { type: "stream_end", content: (chunk as any).content });
+        return;
+      }
+    }
+    console.log('[MainHandlers] Agent task stream complete');
+  } catch (error) {
+    console.error('[MainHandlers] Error during agent task in app:', error);
+    event.sender.send("reply", {
+      type: "error",
+      message: "Failed to complete task: " + error
+    });
+  }
 }
 
+async function isAppFrontmost(appName: string): Promise<boolean> {
+  try {
+    const { stdout } = await execPromise(`osascript -e 'tell application "System Events" to name of first process whose frontmost is true'`);
+    return stdout.trim() === appName;
+  } catch {
+    return false;
+  }
+}
+
+async function isAppVisible(appName: string): Promise<boolean> {
+  try {
+    const bundleId = await getBundleId(appName);
+    const { stdout } = await execPromise(`swift swift/windows.swift ${bundleId}`);
+    const arr = JSON.parse(stdout || '[]') as Array<any>;
+    return Array.isArray(arr) && arr.length > 0;
+  } catch {
+    return false;
+  }
+}
+
+async function resolvePreferredBrowser(): Promise<string> {
+  const candidates = ["Google Chrome", "Safari", "Arc", "Firefox", "Microsoft Edge", "Brave Browser"];
+  for (const app of candidates) {
+    try { await getBundleId(app); return app; } catch { continue; }
+  }
+  return "Safari";
+}
+
+function extractTopicFromPrompt(prompt: string): string {
+  const m = prompt.match(/about\s+(.+?)(?:\.|$)/i);
+  return (m ? m[1] : prompt).trim();
+}
+
+async function getActiveBrowserUrl(): Promise<string> {
+  try {
+    const { stdout } = await execPromise(`osascript -e 'tell application "Google Chrome" to return URL of active tab of front window'`);
+    return stdout.trim();
+  } catch {}
+  try {
+    const { stdout } = await execPromise(`osascript -e 'tell application "Safari" to return URL of front document'`);
+    return stdout.trim();
+  } catch {}
+  return '';
+}
+
+async function browserUrlContains(substr: string): Promise<boolean> {
+  try {
+    const url = await getActiveBrowserUrl();
+    return url.toLowerCase().includes(substr.toLowerCase());
+  } catch { return false; }
+}
+
+function buildPlanForTask(prompt: string): PlanStep[] | null {
+  // Simple planner for common task categories
+  if (/\b(presentation|slides|slide deck|deck|ppt|keynote)\b/i.test(prompt)) {
+    const browser = 'Google Chrome';
+    const topic = extractTopicFromPrompt(prompt);
+    return [
+      { id: 1, title: 'Open browser', action: 'open_app', params: { appName: browser }, check: { type: 'app_frontmost', value: browser } },
+      { id: 2, title: 'Navigate to Google Slides', action: 'navigate_url', params: { url: 'https://slides.google.com' }, check: { type: 'url_contains', value: 'slides.google.com' } },
+      { id: 3, title: `Create presentation about "${topic}"`, action: 'agent', params: { appName: browser, prompt: `On Google Slides, create a new blank presentation titled "${topic}" and add initial slides.` } }
+    ];
+  }
+  return null;
+}
+
+async function executePlan(
+  plan: PlanStep[],
+  event: any,
+  history: AgentInputItem[],
+  isAgentMode: boolean
+) {
+  const cursor = getVirtualCursor();
+  for (const step of plan) {
+    console.log(`[Plan] Executing step ${step.id}: ${step.title}`);
+    if (step.check?.type === 'app_frontmost') {
+      if (await isAppFrontmost(step.check.value)) { console.log(`[Plan] Step ${step.id} skipped - already frontmost`); continue; }
+    }
+    if (step.check?.type === 'url_contains') {
+      if (await browserUrlContains(step.check.value)) { console.log(`[Plan] Step ${step.id} skipped - URL already present`); continue; }
+    }
+    if (step.action === 'open_app') {
+      let appName = (step.params?.appName as string) || 'Safari';
+      if (appName === 'Google Chrome') { appName = await resolvePreferredBrowser(); }
+      await cursor.show();
+      await performVisualNavigation(appName, cursor, event);
+      let ok = false; for (let i = 0; i < 6; i++) { if (await isAppFrontmost(appName) || await isAppVisible(appName)) { ok = true; break; } await new Promise(r => setTimeout(r, 300)); }
+      console.log(`[Plan] Step ${step.id} ${ok ? 'completed' : 'pending'}`);
+    } else if (step.action === 'navigate_url') {
+      const url = step.params?.url as string;
+      const browser = (await isAppFrontmost('Google Chrome')) ? 'Google Chrome' : (await isAppFrontmost('Safari') ? 'Safari' : await resolvePreferredBrowser());
+      try { await runAgentInApp(browser, `Focus the address bar then navigate to ${url}`, history, event, isAgentMode); } catch {}
+      try { await performAction('=Key\n^cmd+l', browser, [], event, isAgentMode); await performAction(`=Key\n${url} ^enter`, browser, [], event, isAgentMode); } catch {}
+      let ok = false; for (let i = 0; i < 8; i++) { if (await browserUrlContains(step.check?.value || '')) { ok = true; break; } await new Promise(r => setTimeout(r, 400)); }
+      console.log(`[Plan] Step ${step.id} ${ok ? 'completed' : 'pending'}`);
+    } else if (step.action === 'agent') {
+      const appName = (step.params?.appName as string) || 'Desktop';
+      const prompt = (step.params?.prompt as string) || '';
+      try { await runAgentInApp(appName, prompt, history, event, isAgentMode); console.log(`[Plan] Step ${step.id} completed`); } catch (e) { console.log(`[Plan] Step ${step.id} error:`, e); }
+    }
+  }
+}
+}

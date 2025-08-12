@@ -1,4 +1,4 @@
-import { ExecException } from "node:child_process";
+// import { ExecException } from "node:child_process"; // Unused
 import { Element } from "../types";
 import { logWithElapsed, execPromise } from "../utils/utils";
 
@@ -33,8 +33,8 @@ export default async function click(
     logWithElapsed("performAction", `Executed click for id: ${id}`);
     return { type: "click", id, element: element || null };
   } catch (error) {
-    const { stderr } = error as ExecException;
-    logWithElapsed("performAction", `Error clicking element ${id}: ${stderr}`);
-    return { type: "click", id, element: element || null, error: stderr };
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    logWithElapsed("performAction", `Error clicking element ${id}: ${errorMessage}`);
+    return { type: "click", id, element: element || null, error: errorMessage };
   }
 }

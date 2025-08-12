@@ -4,9 +4,7 @@ import { ipcRenderer, contextBridge } from "electron";
 contextBridge.exposeInMainWorld("ipcRenderer", {
   on(...args: Parameters<typeof ipcRenderer.on>) {
     const [channel, listener] = args;
-    return ipcRenderer.on(channel, (event, ...args) =>
-      listener(event, ...args)
-    );
+    return ipcRenderer.on(channel, (event, ...args) => listener(event, ...args));
   },
   off(...args: Parameters<typeof ipcRenderer.off>) {
     const [channel, ...omit] = args;
@@ -58,7 +56,57 @@ contextBridge.exposeInMainWorld("ipcRenderer", {
   // Custom APIs for renderer
   enableLoopback: () => ipcRenderer.invoke("enable-loopback-audio"),
   disableLoopback: () => ipcRenderer.invoke("disable-loopback-audio"),
+});
 
-  // You can expose other APTs you need here.
-  // ...
+// Bridge for Glass-like web components (no glass dependency)
+contextBridge.exposeInMainWorld('api', {
+  listenView: {
+    onSessionStateChanged: (callback: (event: any, data: { isActive: boolean }) => void) => {
+      const handleInit = (_: any, _data: any) => callback(_, { isActive: true });
+      const handleClose = (_: any) => callback(_, { isActive: false });
+      ipcRenderer.on('session-initialized', handleInit);
+      ipcRenderer.on('session-closed', handleClose);
+    },
+    adjustWindowHeight: (_view: string, targetHeight: number) => {
+      return ipcRenderer.invoke('listen-view-adjust-window-height', targetHeight);
+    },
+  },
+  sttView: {
+    onSttUpdate: (callback: (event: any, data: { speaker: string; text: string; isFinal: boolean; isPartial: boolean }) => void) => {
+      ipcRenderer.on('stt-update', callback);
+    },
+    removeOnSttUpdate: (callback: any) => {
+      ipcRenderer.off('stt-update', callback);
+    },
+  },
+  summaryView: {
+    onSummaryUpdate: (callback: (event: any, data: any) => void) => {
+      const handler = (_: any, analysis: any) => {
+        // Transform analysis to SummaryView expected structure
+        const structured = {
+          summary: Array.isArray(analysis.summary) ? analysis.summary : [],
+          topic: { header: analysis.topic?.header || '', bullets: Array.isArray(analysis.keyPoints) ? analysis.keyPoints : [] },
+          actions: Array.isArray(analysis.actions) ? analysis.actions : [],
+          followUps: Array.isArray(analysis.questions) ? analysis.questions : [],
+        };
+        callback(_, structured);
+      };
+      ipcRenderer.on('analysis-complete', handler);
+    },
+    onContextualSearch: (callback: (event: any, items: any[]) => void) => {
+      ipcRenderer.on('contextual-search', callback);
+    },
+    onContextualSuggestions: (callback: (event: any, items: any[]) => void) => {
+      ipcRenderer.on('contextual-suggestions', callback);
+    },
+    removeAllSummaryUpdateListeners: () => {
+      ipcRenderer.removeAllListeners('analysis-complete');
+      ipcRenderer.removeAllListeners('contextual-search');
+      ipcRenderer.removeAllListeners('contextual-suggestions');
+    },
+    performSearch: (query: string) => {
+      ipcRenderer.send('perform-search', query);
+      return Promise.resolve({ success: true });
+    },
+  },
 });

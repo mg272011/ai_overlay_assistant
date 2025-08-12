@@ -21,7 +21,7 @@
 
 @font-face {
   font-family: "Satoshi";
-  src: url("./fonts/Satoshi/Satoshi-Regular.woff") format("woff");
+  src: url("/fonts/Satoshi/Satoshi-Regular.woff") format("woff");
   font-weight: normal;
   font-style: normal;
   font-display: swap; /* Improves performance by displaying fallback text while the font loads */
@@ -29,7 +29,7 @@
 
 @font-face {
   font-family: "Satoshi";
-  src: url("./fonts/Satoshi/Satoshi-Medium.woff") format("woff");
+  src: url("/fonts/Satoshi/Satoshi-Medium.woff") format("woff");
   font-weight: medium;
   font-style: normal;
   font-display: swap; /* Improves performance by displaying fallback text while the font loads */
@@ -37,7 +37,7 @@
 
 @font-face {
   font-family: "Satoshi";
-  src: url("./fonts/Satoshi/Satoshi-Bold.woff") format("woff");
+  src: url("/fonts/Satoshi/Satoshi-Bold.woff") format("woff");
   font-weight: bold;
   font-style: normal;
   font-display: swap; /* Improves performance by displaying fallback text while the font loads */
@@ -54,6 +54,53 @@
 
 body {
   margin: 0;
+  padding: 0;
+  background-color: transparent !important;
+  background: transparent !important;
+  overflow: hidden;
+  height: 100vh;
+  width: 100vw;
+  /* Allow interaction with overlay UI */
+  pointer-events: auto;
+  /* Ensure backdrop filters work on desktop background */
+  isolation: isolate;
+}
+
+html {
+  background-color: transparent !important;
+  background: transparent !important;
+  height: 100%;
+  width: 100%;
+}
+
+#root {
+  height: 100%;
+  width: 100%;
+  /* Allow interaction */
+  pointer-events: auto;
+}
+
+/* Make the mainbar draggable like Clonely */
+.glass {
+  -webkit-app-region: drag;
+  /* Make glass elements clickable */
+  pointer-events: auto;
+}
+
+/* But keep buttons clickable */
+.glass button {
+  -webkit-app-region: no-drag;
+  pointer-events: auto;
+}
+
+/* Make all interactive elements clickable */
+button, input, form, [onclick] {
+  pointer-events: auto;
+}
+
+/* Make the main app container clickable for UI */
+.app-container {
+  pointer-events: auto;
 }
 
 .app-region-drag {
@@ -62,3 +109,514 @@ body {
 .app-region-no-drag {
   -webkit-app-region: no-drag;
 }
+
+/* Clonely-style glass effect */
+.glass {
+  background-color: rgba(255, 255, 255, 0.8) !important;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+
+/* Regular Chat UI for Ask/Agent mode - More opaque for readability */
+.glass-chat-container {
+  background: rgba(20, 20, 25, 0.85); /* Much more opaque for readability */
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border-radius: 12px;
+  padding: 0; /* Remove padding, let children handle it */
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.5);
+  width: 100%;
+}
+
+/* Meeting mode chat containers - Clearer background */
+.meeting-chat-panel {
+  display: flex;
+  flex-direction: column;
+  color: #ffffff;
+  box-sizing: border-box;
+  position: relative;
+  background: rgba(52, 199, 89, 0.1); /* Green tinted background for meeting chats */
+  backdrop-filter: blur(8px) saturate(250%) contrast(150%) brightness(115%);
+  -webkit-backdrop-filter: blur(8px) saturate(250%) contrast(150%) brightness(115%);
+  overflow: hidden;
+  border-radius: 12px;
+  width: 100%;
+  height: 100%;
+  max-height: 60vh;
+  pointer-events: auto;
+}
+
+/* Chat header styling */
+.glass-chat-header {
+  padding: 8px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  flex-shrink: 0;
+}
+
+/* Make the input area interactive */
+.glass-chat-input-area, .glass-chat-input-area * {
+  pointer-events: auto;
+}
+
+/* Chat content (messages) scrollable but allow interaction for scrolling */
+.glass-chat-content {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 16px;
+  position: relative;
+  z-index: 2;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.3) transparent;
+  pointer-events: auto; /* Enable scrolling */
+  max-height: calc(60vh - 120px); /* Leave room for header and input */
+  min-height: 200px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.glass-chat-content::-webkit-scrollbar {
+  width: 6px;
+}
+
+.glass-chat-content::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.glass-chat-content::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.3);
+  border-radius: 3px;
+}
+
+.glass-chat-content::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.5);
+}
+
+.glass-chat-input-area {
+  padding: 12px 16px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(10, 10, 15, 0.7);
+  position: relative;
+  z-index: 2;
+  flex-shrink: 0;
+  width: 100%;
+}
+
+.glass-message {
+  padding: 12px 16px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+  font-size: 14px;
+  line-height: 1.6;
+  max-width: 85%;
+  word-wrap: break-word;
+}
+
+.glass-message.user {
+  background: rgba(0, 122, 255, 0.2);
+  border-color: rgba(0, 122, 255, 0.3);
+  margin-left: auto;
+  align-self: flex-end;
+}
+
+.glass-message.assistant {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.15);
+  margin-right: auto;
+  align-self: flex-start;
+}
+
+.glass-message.error {
+  background: rgba(255, 59, 48, 0.2);
+  border-color: rgba(255, 59, 48, 0.3);
+}
+
+.glass-message.streaming {
+  background: rgba(52, 199, 89, 0.2);
+  border-color: rgba(52, 199, 89, 0.3);
+}
+
+.glass-input {
+  width: 100%;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+  padding: 10px 14px;
+  color: #ffffff;
+  font-size: 14px;
+  outline: none;
+  transition: all 0.2s ease;
+}
+
+.glass-input::placeholder {
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.glass-input:focus {
+  border-color: rgba(0, 122, 255, 0.5);
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.glass-button {
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 6px;
+  color: #ffffff;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.glass-button:hover {
+  background: rgba(255, 255, 255, 0.2);
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.glass-button.primary {
+  background: rgba(0, 122, 255, 0.8);
+  border-color: rgba(0, 122, 255, 1);
+}
+
+.glass-button.primary:hover {
+  background: rgba(0, 122, 255, 1);
+}
+
+.glass-empty-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 200px;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 14px;
+  font-style: italic;
+  text-align: center;
+}
+
+/* Clonely-style button variants */
+:root {
+  --background: hsl(0 0% 100%);
+  --foreground: hsl(0 0% 3.9%);
+  --card: hsl(0 0% 100%);
+  --card-foreground: hsl(0 0% 3.9%);
+  --popover: hsl(0 0% 100%);
+  --popover-foreground: hsl(0 0% 3.9%);
+  --primary: hsl(0 0% 9%);
+  --primary-foreground: hsl(0 0% 98%);
+  --secondary: hsl(0 0% 96.1%);
+  --secondary-foreground: hsl(0 0% 9%);
+  --muted: hsl(0 0% 96.1%);
+  --muted-foreground: hsl(0 0% 45.1%);
+  --accent: hsl(0 0% 96.1%);
+  --accent-foreground: hsl(0 0% 9%);
+  --destructive: hsl(0 84.2% 60.2%);
+  --destructive-foreground: hsl(0 0% 98%);
+  --border: hsl(0 0% 89.8%);
+  --input: hsl(0 0% 89.8%);
+  --ring: hsl(0 0% 3.9%);
+  --radius: 0.5rem;
+}
+
+.bg-accent {
+  background-color: var(--accent);
+}
+
+.text-accent-foreground {
+  color: var(--accent-foreground);
+}
+
+.bg-secondary {
+  background-color: var(--secondary);
+}
+
+.text-secondary-foreground {
+  color: var(--secondary-foreground);
+}
+
+.bg-destructive {
+  background-color: var(--destructive);
+}
+
+.text-white {
+  color: white;
+}
+
+.shadow-xs {
+  box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+}
+
+.focus-visible\:border-ring:focus-visible {
+  border-color: var(--ring);
+}
+
+.focus-visible\:ring-ring\/50:focus-visible {
+  box-shadow: 0 0 0 3px rgba(hsl(0 0% 3.9%), 0.5);
+}
+
+.focus-visible\:ring-\[3px\]:focus-visible {
+  box-shadow: 0 0 0 3px currentColor;
+}
+
+/* --- Liquid Glass Theme: panels, buttons, and animations --- */
+:root {
+  --glass-bg: rgba(0, 0, 0, 0.08);
+  --glass-bg-2: rgba(0, 0, 0, 0.08);
+  --glass-border: transparent;
+  --glass-border-soft: transparent;
+  --glass-highlight: rgba(255, 255, 255, 0.35);
+  --glass-shadow: none;
+  --glass-blur: 15px;
+  --glass-radius: 24px;
+  --button-radius: 16px;
+  --liquid-ease: cubic-bezier(.20,.80,.20,1);
+}
+
+.liquid-panel {
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border-soft);
+  border-radius: var(--glass-radius);
+  backdrop-filter: saturate(160%) blur(var(--glass-blur));
+  -webkit-backdrop-filter: saturate(160%) blur(var(--glass-blur));
+  box-shadow: none;
+  position: relative;
+}
+
+/* Subtle glossy stroke */
+.liquid-panel::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(160deg, rgba(255,255,255,0.22), rgba(255,255,255,0.06), rgba(255,255,255,0.22));
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+}
+
+/* Water-like shimmer */
+.liquid-panel::before {
+  content: "";
+  position: absolute;
+  inset: -2px;
+  border-radius: inherit;
+  background:
+    radial-gradient(120% 80% at 15% 10%, rgba(255,255,255,0.06), rgba(255,255,255,0) 60%),
+    radial-gradient(110% 70% at 85% 90%, rgba(255,255,255,0.05), rgba(255,255,255,0) 60%);
+  mix-blend-mode: overlay;
+  pointer-events: none;
+  animation: rippleFloat 6s ease-in-out infinite alternate;
+}
+
+@keyframes rippleFloat { from { transform: translateY(0); } to { transform: translateY(2px); } }
+
+/* Frost enhancement for mainbar */
+.liquid-frost {
+  backdrop-filter: saturate(180%) blur(22px);
+  -webkit-backdrop-filter: saturate(180%) blur(22px);
+}
+
+/* Buttons */
+.liquid-button {
+  background: transparent;
+  border: none;
+  border-radius: var(--button-radius);
+  color: rgba(255,255,255,0.95);
+  transition: color 0.18s ease, opacity 0.18s ease;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  box-shadow: none;
+  position: relative;
+  overflow: hidden;
+}
+.liquid-button:hover { opacity: 0.95; }
+.liquid-button:active { box-shadow: none; }
+.liquid-button[data-active="true"], .liquid-button.active { background: transparent; border: none; }
+.liquid-button[data-busy="true"], .liquid-button.busy { box-shadow: none; }
+
+/* Overlay when interacting */
+.liquid-button::after {
+  content: "";
+  position: absolute;
+  inset: 2px; /* inset to make a visible rounded rectangle inside the button */
+  border-radius: inherit;
+  background: rgba(0,0,0,0.26);
+  opacity: 0;
+  transform: scale(1);
+  transition: opacity .18s ease, background .18s ease, transform .18s ease;
+  pointer-events: none;
+}
+.liquid-button:hover::after { opacity: .12; transform: scale(1.015); }
+.liquid-button:active::after { opacity: .30; background: rgba(0,0,0,0.32); transform: scale(1.02); }
+/* Selected state: darker, rounded overlay */
+.liquid-button.active::after, .liquid-button[data-active="true"]::after { opacity: .26; background: rgba(0,0,0,0.30); }
+
+/* Mic button variant */
+.liquid-button--mic { position: relative; border-radius: 9999px; }
+.liquid-button--mic[data-live="true"]::after {
+  content: ""; position: absolute; inset: -6px; border-radius: 9999px;
+  background: radial-gradient(60% 60% at 50% 50%, rgba(255, 85, 85, 0.28), rgba(255, 85, 85, 0) 70%);
+  filter: blur(8px); animation: pulseGlow 2s ease-in-out infinite; pointer-events: none;
+}
+/* Keep Listen text white in meeting mode */
+.liquid-button--mic[data-live="true"] { border: 1px solid rgba(255,85,85,0.75); color: #ffffff !important; }
+
+/* Equalizer bars icon: small–medium–small, centered */
+.eq { display:inline-flex; align-items:flex-end; gap:2px; height:14px; margin-left:4px; align-self:center; }
+.eq span { width:2px; background: currentColor; border-radius:1px; transform-origin: bottom; opacity: .95; }
+.eq span:nth-child(1) { height:8px; }
+.eq span:nth-child(2) { height:12px; }
+.eq span:nth-child(3) { height:8px; }
+/* animate only in live mode with musical, non-uniform movement */
+.liquid-button--mic[data-live="true"] .eq span { color: rgba(255,85,85,0.95); background: currentColor; }
+.liquid-button--mic[data-live="true"] .eq span:nth-child(1) { animation: eqBar1 .85s var(--liquid-ease) infinite; }
+.liquid-button--mic[data-live="true"] .eq span:nth-child(2) { animation: eqBar2 1s var(--liquid-ease) infinite .08s; }
+.liquid-button--mic[data-live="true"] .eq span:nth-child(3) { animation: eqBar3 .9s var(--liquid-ease) infinite .16s; }
+@keyframes eqBar1 { 0% { transform: scaleY(.4);} 25% { transform: scaleY(1.3);} 55% { transform: scaleY(.6);} 80% { transform: scaleY(1.0);} 100% { transform: scaleY(.7);} }
+@keyframes eqBar2 { 0% { transform: scaleY(.6);} 20% { transform: scaleY(1.2);} 50% { transform: scaleY(.5);} 75% { transform: scaleY(1.1);} 100% { transform: scaleY(.7);} }
+@keyframes eqBar3 { 0% { transform: scaleY(.5);} 30% { transform: scaleY(1.1);} 60% { transform: scaleY(.6);} 85% { transform: scaleY(1.0);} 100% { transform: scaleY(.8);} }
+
+@keyframes pulseGlow { 0%, 100% { opacity: 0.45; transform: scale(0.98); } 50% { opacity: 0.9; transform: scale(1.02); } }
+
+/* Open/close motion for panes - smoother close */
+.liquid-animate { 
+  will-change: transform, opacity, max-height; 
+  transform-origin: top center; 
+  transition: all 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94); /* Smoother easing */
+}
+.liquid-open { 
+  transform: translateY(0) scale(1); 
+  opacity: 1; 
+  max-height: 70vh;
+  pointer-events: auto;
+  visibility: visible;
+  animation: slideDown 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+.liquid-closed { 
+  transform: translateY(-8px) scale(0.97); 
+  opacity: 0; 
+  max-height: 0;
+  pointer-events: none;
+  visibility: hidden;
+  overflow: hidden;
+  animation: slideUp 0.35s cubic-bezier(0.55, 0.055, 0.675, 0.19);
+}
+
+@keyframes slideDown {
+  from { transform: translateY(-8px) scale(0.97); opacity: 0; }
+  to { transform: translateY(0) scale(1); opacity: 1; }
+}
+
+@keyframes slideUp {
+  from { transform: translateY(0) scale(1); opacity: 1; }
+  to { transform: translateY(-8px) scale(0.97); opacity: 0; }
+}
+
+/* Make existing glass classes slightly darker and clear */
+.glass { background: rgba(255,255,255,0.03) !important; border: 1px solid rgba(255, 255, 255, 0.22); border-radius: var(--glass-radius); box-shadow: none; backdrop-filter: saturate(160%) blur(var(--glass-blur)); -webkit-backdrop-filter: saturate(160%) blur(var(--glass-blur)); }
+/* Main bar - water droplet magnifying effect */
+.mainbar-glass {
+  position: relative;
+  background: rgba(0,0,0,0.04) !important; /* Match lighter panels */
+  border: none;
+  /* Water droplet distortion - reduced blur for magnifying effect */
+  backdrop-filter: blur(8px) saturate(250%) contrast(150%) brightness(115%);
+  -webkit-backdrop-filter: blur(8px) saturate(250%) contrast(150%) brightness(115%);
+  box-shadow: none;
+  transform: scale(1.001); /* Subtle magnification */
+  transform-origin: center;
+}
+.mainbar-glass::before {
+  content: "";
+  position: absolute;
+  inset: -2px;
+  border-radius: inherit;
+  /* subtle caustic-like highlights to simulate liquid glass distortion */
+  background:
+    radial-gradient(120px 80px at 20% 30%, rgba(255,255,255,0.06), rgba(255,255,255,0) 60%),
+    radial-gradient(140px 120px at 80% 70%, rgba(255,255,255,0.05), rgba(255,255,255,0) 65%);
+  mix-blend-mode: overlay;
+  pointer-events: none;
+  animation: rippleFloatMainbar 7s var(--liquid-ease) infinite alternate;
+}
+@keyframes rippleFloatMainbar { from { transform: translateY(0) translateX(0); } to { transform: translateY(1.5px) translateX(1.5px); } }
+
+/* Slightly less rounding specifically for the sidebar panel */
+.sidebar-panel { border-radius: 16px !important; }
+
+/* Chat container polish */
+.glass-chat-container { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.14); border-radius: var(--glass-radius); box-shadow: none; backdrop-filter: saturate(140%) blur(18px); -webkit-backdrop-filter: saturate(140%) blur(18px); }
+
+/* Subheader strip for highlight chats */
+.liquid-subheader { background: rgba(255,255,255,0.02); border-bottom: 1px solid rgba(255,255,255,0.14); }
+
+/* Input polish */
+.glass-input { background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.18); color: #ffffff; }
+.glass-input:focus { border-color: rgba(0, 122, 255, 0.55); background: rgba(255, 255, 255, 0.12); }
+
+/* Buttons used in suggestions (if re-enabled) */
+.glass-button { border-radius: var(--button-radius); background: transparent; border: none; box-shadow: none; }
+.glass-button:hover { background: transparent; }
+
+/* Chat bubbles */
+.glass-message { background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.14); color: #ffffff; }
+.glass-message.user { background: rgba(0, 122, 255, 0.18); border-color: rgba(0,122,255,0.28); }
+.glass-message.streaming { background: rgba(52, 199, 89, 0.18); border-color: rgba(52,199,89,0.28); }
+.glass-message.error { background: rgba(255, 59, 48, 0.18); border-color: rgba(255,59,48,0.28); }
+
+/* Global liquid glass: water droplet effect - SAME as mainbar */
+.glass, .glass-chat-container, .liquid-panel { 
+  background: rgba(0,0,0,0.02) !important; /* Even lighter for meeting panels */
+  backdrop-filter: blur(8px) saturate(250%) contrast(150%) brightness(115%);
+  -webkit-backdrop-filter: blur(8px) saturate(250%) contrast(150%) brightness(115%);
+  border: none !important;
+  box-shadow: none !important;
+}
+
+/* Unify backgrounds: match mainbar tone - make meeting panels same as mainbar */
+.glass, .glass-chat-container, .liquid-panel { 
+  background: rgba(0,0,0,0.08) !important; 
+  border: none; 
+  box-shadow: none;
+}
+
+/* Center meeting panel by default; ONLY shift when actions are shown */
+.meeting-panels { 
+  display: flex; 
+  justify-content: center;
+  align-items: flex-start;
+  width: 100%;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  animation: fadeIn 0.3s ease-out;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Subtle open/close animations */
+.fade-slide-in { animation: fadeSlideIn .28s var(--liquid-ease); }
+@keyframes fadeSlideIn { from { opacity:0; transform: translateY(6px) scale(.98);} to { opacity:1; transform: translateY(0) scale(1);} }
+
+/* Remove red outer glow behind listen: keep only equalizer color */
+.liquid-button--mic[data-live="true"]::after { background: none; filter:none; animation:none; }
+
+/* Smooth panel transitions */
+.panel-animate { transition: transform .32s var(--liquid-ease), opacity .24s var(--liquid-ease); }

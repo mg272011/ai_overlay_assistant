@@ -22,11 +22,11 @@ export async function takeAndSaveScreenshots(
   );
   const sources = await desktopCapturer.getSources({
     types: ["window"],
-    fetchWindowIcons: true,
-    thumbnailSize: { width: 3840, height: 2160 },
+    fetchWindowIcons: false,
+    thumbnailSize: { width: 1920, height: 1080 },
   });
   logWithElapsed("takeAndSaveScreenshots", `Got desktop sources`);
-  const matchingPairs = [];
+  const matchingPairs: Array<{ window: Window; source: any }> = [];
   for (const window of swiftWindows) {
     const source = sources.find(
       (s) => typeof s.name === "string" && s.name === window.name
@@ -35,11 +35,10 @@ export async function takeAndSaveScreenshots(
       matchingPairs.push({ window, source });
     }
   }
-  let screenshotBase64;
+  let screenshotBase64: string | undefined;
   for (const { window, source } of matchingPairs) {
     const image = source.thumbnail;
     if (!image.isEmpty()) {
-      console.log(window.name, window.name.replace(" ", "-"));
       const screenshotPath = path.join(
         stepFolder,
         `screenshot-${encodeURI(window.name)}.png`
@@ -54,5 +53,33 @@ export async function takeAndSaveScreenshots(
       }
     }
   }
+
+  // Fallback: capture entire screen (useful for appName 'Desktop' or when no window thumbnail found)
+  if (!screenshotBase64) {
+    try {
+      const screenSources = await desktopCapturer.getSources({
+        types: ["screen"],
+        fetchWindowIcons: false,
+        thumbnailSize: { width: 1920, height: 1080 },
+      });
+      const primary = screenSources[0];
+      if (primary && !primary.thumbnail.isEmpty()) {
+        const screenshotPath = path.join(stepFolder, `screenshot-Desktop.png`);
+        fs.writeFileSync(screenshotPath, primary.thumbnail.toPNG());
+        logWithElapsed(
+          "takeAndSaveScreenshots",
+          `Saved screen screenshot: ${screenshotPath}`
+        );
+        screenshotBase64 = fs.readFileSync(screenshotPath).toString("base64");
+      }
+    } catch (e) {
+      // ignore here; will throw below if still empty
+    }
+  }
+
+  if (!screenshotBase64) {
+    throw new Error(`No screenshot available for ${appName}`);
+  }
+
   return screenshotBase64;
 }
