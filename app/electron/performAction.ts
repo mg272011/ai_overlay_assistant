@@ -146,13 +146,27 @@ export async function performAction(
       case "=FindAndClickText": {
         const target = (body || '').trim();
         if (!target) break;
-        const { takeAndSaveScreenshots } = await import("./utils/screenshots");
-        const { geminiVision } = await import("./services/GeminiVisionService");
         const timestampFolder = `${process.cwd()}/logs/${Date.now()}-agent`;
         try {
-          // Capture screen quickly
+          // 1) Try fast local OCR via Swift (no screenshot roundtrip)
+          try {
+            const { execPromise } = await import("./utils/utils");
+            const { stdout } = await execPromise(`swift swift/ocr.swift ${JSON.stringify(target)}`);
+            const data = JSON.parse(stdout || '{}');
+            if (data?.found && Number.isFinite(data.x) && Number.isFinite(data.y)) {
+              const x = Math.round(data.x); const y = Math.round(data.y);
+              await cursor.moveCursor({ x, y });
+              await new Promise(r => setTimeout(r, 80));
+              await cursor.performClick({ x, y });
+              event.sender.send("reply", { type: "action", message: `Clicked '${target}' at (${x}, ${y}) [local OCR]` });
+              return { type: "cursor-click", x, y } as any;
+            }
+          } catch {}
+
+          // 2) Fallback to Gemini vision using Electron screenshot
+          const { takeAndSaveScreenshots } = await import("./utils/screenshots");
+          const { geminiVision } = await import("./services/GeminiVisionService");
           const screenshot = await takeAndSaveScreenshots("Desktop", timestampFolder);
-          // Ask vision to find the element center
           const res = await geminiVision.analyzeScreenForElement(
             screenshot,
             `Clickable UI for text or label "${target}". Return FOUND: {x,y} for the clickable center.`
@@ -162,13 +176,10 @@ export async function performAction(
             return { type: "cursor-click", x: -1, y: -1, error: `Not found: ${target}` } as any;
           }
           const x = res.x, y = res.y;
-          // Move AI cursor visually first
           await cursor.moveCursor({ x, y });
-          // Small pause for stability
           await new Promise(r => setTimeout(r, 120));
-          // Click using Swift-based click
           await cursor.performClick({ x, y });
-          event.sender.send("reply", { type: "action", message: `Clicked '${target}' at (${x}, ${y})` });
+          event.sender.send("reply", { type: "action", message: `Clicked '${target}' at (${x}, ${y}) [gemini]` });
           return { type: "cursor-click", x, y };
         } catch (err: any) {
           event.sender.send("reply", { type: "action", message: `Vision click failed: ${String(err?.message || err)}` });
@@ -187,6 +198,12 @@ export async function performAction(
   }
 
   // Regular mode actions (existing implementation)
+  // Block AppleScript entirely when in collab/agent mode
+  if (isAgentMode && address === "=Applescript") {
+    logWithElapsed("performAction", "Skipping AppleScript in collab mode");
+    event.sender.send("reply", { type: "action", message: `Skipped AppleScript in collab mode` });
+    return { type: "applescript", script: body, error: "blocked in collab" } as any;
+  }
   switch (address) {
     case "=Applescript": {
       console.log(`[performAction] Executing Applescript in ${isAgentMode ? 'COLLAB' : 'REGULAR'} mode`);
