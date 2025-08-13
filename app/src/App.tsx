@@ -1255,7 +1255,7 @@ function App() {
                     </div>
                   </div>
                   
-                  <div className="flex-1 p-4 overflow-y-auto text-sm leading-relaxed" style={{ maxHeight: 'calc(65vh - 120px)' }}>
+                  <div className="flex-1 glass-chat-content text-sm leading-relaxed" style={{ maxHeight: 'calc(65vh - 120px)' }}>
                     {/* Chat messages for highlight */}
                     {messages.map((msg, i) => (
                       <div
