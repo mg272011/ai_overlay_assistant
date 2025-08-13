@@ -15,7 +15,7 @@ export default defineConfig({
         vite: {
           build: {
             rollupOptions: {
-              external: ["bufferutil", "utf-8-validate"]
+              external: ["bufferutil", "utf-8-validate", "electron-liquid-glass"]
             }
           }
         }

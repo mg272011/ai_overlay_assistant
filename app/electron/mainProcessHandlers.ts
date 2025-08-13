@@ -376,9 +376,15 @@ export function setupMainHandlers({ win }: { win: InstanceType<typeof BrowserWin
 
   // Start a per-action meeting chat (separate from the main chat)
   ipcMain.on('start-meeting-chat', async (event, payload: { chatId: string; action: any }) => {
+    console.log('[MeetingChat] ===== START-MEETING-CHAT HANDLER CALLED =====');
+    console.log('[MeetingChat] Received payload:', JSON.stringify(payload, null, 2));
     try {
       const { chatId, action } = payload || {} as any;
-      if (!chatId) return;
+      console.log('[MeetingChat] Extracted chatId:', chatId, 'action:', action);
+      if (!chatId) {
+        console.error('[MeetingChat] No chatId provided, returning early');
+        return;
+      }
 
       // Ensure contextual actions service is initialized
     contextualActionsSvc = contextualActionsSvc || new ContextualActionsService();
@@ -409,7 +415,10 @@ export function setupMainHandlers({ win }: { win: InstanceType<typeof BrowserWin
 
       // Stream fake chunks for UX while fetching
       const send = (type: string, content?: string) => {
+        console.log(`[MeetingChat] send() called with type: ${type}, content length: ${content?.length || 0}`);
+        console.log(`[MeetingChat] send() content preview: ${content?.substring(0, 100) || '(no content)'}...`);
         mainWindow?.webContents.send('meeting-chat-stream', { chatId, type, content });
+        console.log(`[MeetingChat] sent meeting-chat-stream event to renderer`);
       };
 
       if (action?.type === 'say-next') {
@@ -443,13 +452,19 @@ Do NOT say things like "Consider asking..." or "You might want to..." - just pro
 ${seed}`;
             
             console.log('[MeetingChat] Sending request to Gemini...');
+            console.log('[MeetingChat] Prompt being sent:', prompt);
             const result = await model.generateContent(prompt);
-            console.log('[MeetingChat] Got Gemini response');
+            console.log('[MeetingChat] Got Gemini response - raw result:', result);
+            console.log('[MeetingChat] Response object:', result.response);
+            console.log('[MeetingChat] Response text method result:', result.response.text());
             const text = result.response.text()?.trim() || 'Could you elaborate on that last point?';
-            console.log('[MeetingChat] Sending text to frontend:', text.substring(0, 50) + '...');
+            console.log('[MeetingChat] Final processed text:', text);
+            console.log('[MeetingChat] Text length:', text.length);
+            console.log('[MeetingChat] Sending text to frontend...');
             send('text', text);
+            console.log('[MeetingChat] Sent text, now sending stream_end...');
             send('stream_end');
-            console.log('[MeetingChat] Say-next complete');
+            console.log('[MeetingChat] Say-next complete - all done!');
           } else {
             console.log('[MeetingChat] No GEMINI_API_KEY, using fallback response');
             // Fallback deterministic text
@@ -1852,13 +1867,9 @@ Do NOT describe the screen. Do NOT add anything else. Just use the exact format 
 
 // Monitoring functions removed - screenshots now taken on-demand only
 
-  // Visual navigation function for collaborative mode
+  // Visual navigation function for collaborative mode - NEW SPOTLIGHT-BASED APPROACH
 async function performVisualNavigation(appName: string, cursor: ReturnType<typeof getVirtualCursor>, event: any) {
-  let goalAchieved = false;
-  const maxAttempts = 5;
-  let attempt = 0;
-
-  console.log(`[VisualNav] Starting visual navigation to open ${appName}`);
+  console.log(`[VisualNav] Starting Spotlight-based navigation to open ${appName}`);
 
   // Early exit: if app already frontmost, treat as success
   if (await isAppFrontmost(appName)) {
@@ -1866,296 +1877,109 @@ async function performVisualNavigation(appName: string, cursor: ReturnType<typeo
     return;
   }
 
-  // FIRST: Always try Dock click via Accessibility before anything else
-  console.log(`[VisualNav] Trying direct Dock click first for ${appName}...`);
+  // NEW APPROACH: Use Spotlight search for reliable app opening
+  try {
+    console.log(`[VisualNav] 🎯 Using Spotlight-based approach for ${appName}`);
+    
+    // Step 1: Move cursor to center of screen for visibility
+    const display = screen.getPrimaryDisplay();
+    const centerX = Math.floor(display.bounds.width / 2);
+    const centerY = Math.floor(display.bounds.height / 2);
+    
+    console.log(`[VisualNav] Moving cursor to screen center (${centerX}, ${centerY})`);
+    await cursor.moveCursor({ x: centerX, y: centerY });
+    await new Promise(resolve => setTimeout(resolve, 200));
+    
+    // Step 2: Open Spotlight with Cmd+Space
+    console.log(`[VisualNav] Opening Spotlight search...`);
+    await runAppleScript(`tell application "System Events" to keystroke space using command down`);
+    await new Promise(resolve => setTimeout(resolve, 800)); // Wait for Spotlight to open
+    
+    // Step 3: Type the app name directly (Spotlight input should be auto-focused)
+    console.log(`[VisualNav] Typing "${appName}" into Spotlight...`);
+    await runAppleScript(`tell application "System Events" to keystroke "${appName}"`);
+    await new Promise(resolve => setTimeout(resolve, 600)); // Wait for search results
+    
+    // Step 4: Press Enter to open the top result
+    console.log(`[VisualNav] Pressing Enter to open ${appName}...`);
+    await runAppleScript(`tell application "System Events" to keystroke return`);
+    await new Promise(resolve => setTimeout(resolve, 1500)); // Wait for app to launch
+    
+    // Step 5: Verify the app opened successfully
+    let opened = false;
+    for (let i = 0; i < 6; i++) {
+      if (await isAppFrontmost(appName) || await isAppVisible(appName)) {
+        console.log(`[VisualNav] ✅ ${appName} opened successfully via Spotlight!`);
+        opened = true;
+        break;
+      }
+      console.log(`[VisualNav] Waiting for ${appName} to fully load... (${i + 1}/6)`);
+      await new Promise(r => setTimeout(r, 500));
+    }
+    
+    if (opened) {
+      event.sender.send("reply", {
+        type: "success",
+        message: `${appName} opened successfully via Spotlight search!`,
+      });
+      return;
+    } else {
+      console.log(`[VisualNav] ⚠️ ${appName} may have opened but not detected as frontmost`);
+      // Continue to fallback methods
+    }
+    
+  } catch (error) {
+    console.error(`[VisualNav] ❌ Spotlight approach failed:`, error);
+    // Continue to fallback methods
+  }
+
+  // FALLBACK: Try dock method if Spotlight fails
+  console.log(`[VisualNav] Trying fallback Dock approach for ${appName}...`);
   const directDockClicked = await clickDockItemIfAvailable(appName, cursor);
   if (directDockClicked) {
     // Verify app opened
     for (let i = 0; i < 5; i++) {
       if (await isAppFrontmost(appName) || await isAppVisible(appName)) {
-        console.log(`[VisualNav] ${appName} opened via direct Dock click!`);
+        console.log(`[VisualNav] ${appName} opened via fallback Dock click!`);
         return;
       }
       await new Promise(r => setTimeout(r, 300));
     }
   }
 
-  while (attempt < maxAttempts && !goalAchieved) {
-    attempt++;
-    console.log(`[VisualNav] Attempt ${attempt}/${maxAttempts}`);
-
-    // First, try to click the Dock item deterministically via Accessibility
-    const axClicked = await clickDockItemIfAvailable(appName, cursor);
-    if (axClicked) {
-      // Confirm app appears with at least one window or frontmost within a short timeout
-      for (let i = 0; i < 5; i++) {
-        if (await isAppFrontmost(appName) || await isAppVisible(appName)) {
-          goalAchieved = true;
-          break;
-        }
-        await new Promise(r => setTimeout(r, 300));
+  // Final fallback: Native app opening if both Spotlight and Dock fail
+  console.log(`[VisualNav] All visual methods failed, trying native 'open' command...`);
+  try {
+    await runAppleScript(`tell application "${appName}" to activate`);
+    
+    // Wait and verify the app opened
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    for (let i = 0; i < 5; i++) {
+      if (await isAppFrontmost(appName) || await isAppVisible(appName)) {
+        console.log(`[VisualNav] ✅ ${appName} opened successfully via native fallback!`);
+        event.sender.send("reply", {
+          type: "success",
+          message: `${appName} opened successfully!`,
+        });
+        return;
       }
-      if (goalAchieved) {
-        console.log(`[VisualNav] ${appName} detected open/frontmost after Dock click`);
-        break;
-      }
-    }
-
-    // Take current screenshot
-    const logFolder = createLogFolder(`visual-nav-${appName}`);
-    const stepFolder = path.join(logFolder, `step-${attempt}`);
-    if (!fs.existsSync(stepFolder)) {
-      fs.mkdirSync(stepFolder, { recursive: true });
+      await new Promise(r => setTimeout(r, 500));
     }
     
-    try {
-      const screenshotBase64 = await takeAndSaveScreenshots("Desktop", stepFolder);
-      if (!screenshotBase64) {
-        console.error(`[VisualNav] Failed to take screenshot`);
-        break;
-      }
-      
-      // Try Gemini first, fallback to GPT-4o if it fails
-      console.log(`[VisualNav] Attempt ${attempt}: Taking single screenshot for ${appName} analysis`);
-      
-      let aiResponse = "";
-      let analysisMethod = "";
-      
-      try {
-        // Try Gemini 2.5 Flash first for speed
-        console.log(`[VisualNav] Using Gemini 2.5 Flash for fast analysis`);
-        aiResponse = await geminiVision.analyzeScreenForNavigation(screenshotBase64, appName, attempt);
-        analysisMethod = "Gemini";
-        
-        // Validate the response format
-        if (!aiResponse || !aiResponse.includes(":")) {
-          throw new Error("Invalid Gemini response format");
-        }
-        
-      } catch (geminiError) {
-        console.warn(`[VisualNav] Gemini failed, falling back to GPT-4o:`, geminiError);
-        analysisMethod = "GPT-4o (fallback)";
-        
-        // Fallback to GPT-4o with detailed prompt
-        const navigationPrompt = `Here is my current screen. I want to open ${appName}.
-
-ANALYZE the screen and tell me exactly where to click to achieve this goal.
-
-If you can see the ${appName} icon in the dock (bottom of screen), respond with:
-CLICK_DOCK: {x,y}
-
-If you cannot see ${appName} in the dock, but can see other interface elements, respond with:
-CLICK_SPOTLIGHT: {x,y} - to open Spotlight search
-or
-CLICK_LAUNCHPAD: {x,y} - to open Launchpad
-or  
-TYPE_SEARCH: {text} - if Spotlight is already open
-
-If ${appName} is already open/visible, respond with:
-GOAL_ACHIEVED
-
-Provide ONLY the action and coordinates. Be precise.`;
-        
-        const streamGenerator = runActionAgentStreaming(
-          "Desktop", navigationPrompt, [], [], screenshotBase64, stepFolder,
-          async (_toolName: string, _args: string) => { return "Visual analysis complete"; }, false
-        );
-        
-        for await (const chunk of streamGenerator) {
-          if (chunk.type === "text") { aiResponse += chunk.content; }
-        }
-      }
-
-      console.log(`[VisualNav] ${analysisMethod} response: ${aiResponse}`);
-
-      // Parse AI response and execute action
-      if (aiResponse.includes("GOAL_ACHIEVED")) {
-        console.log(`[VisualNav] Goal achieved - ${appName} is open`);
-        goalAchieved = true;
-        
-      } else if (aiResponse.includes("CLICK_DOCK:")) {
-        // Prefer Accessibility to resolve Dock item frame reliably
-        const resolved = await geminiVision.getDockItemFrame(appName);
-        if (resolved.found && typeof resolved.centerX === 'number' && typeof resolved.centerY === 'number') {
-          const x = resolved.centerX!;
-          const y = resolved.centerY!;
-          console.log(`[VisualNav] Clicking dock item for ${appName} at resolved center (${x}, ${y})`);
-          await cursor.moveCursor({ x, y });
-          await new Promise(resolve => setTimeout(resolve, 250));
-          await cursor.performClick({ x, y });
-          await new Promise(resolve => setTimeout(resolve, 1200));
-        } else {
-          // If AX is unavailable (e.g., AccessibilityNotTrusted), try AI-provided coordinates
-          const dockMatch = aiResponse.match(/CLICK_DOCK:\s*\{?\s*(-?\d+)\s*,\s*(-?\d+)\s*\}?/);
-          if (dockMatch) {
-            let x = parseInt(dockMatch[1], 10);
-            let y = parseInt(dockMatch[2], 10);
-
-            // If y is extremely close to the bottom edge (common with mispredictions),
-            // adjust upward by a small dynamic margin so we click within the icon area.
-            try {
-              const display = screen.getPrimaryDisplay();
-              const screenHeight = display.bounds.height;
-              const bottomMargin = Math.max(28, Math.round(screenHeight * 0.05)); // ~5% of height, min 28px
-              if (y > screenHeight - bottomMargin) {
-                const adjustedY = screenHeight - bottomMargin;
-                console.log(`[VisualNav] Adjusting Dock Y from ${y} to ${adjustedY} to avoid bottom edge misclick`);
-                y = adjustedY;
-              }
-            } catch {}
-
-            console.log(`[VisualNav] AX unavailable or not found. Using AI-provided Dock coords (${x}, ${y})`);
-            await cursor.moveCursor({ x, y });
-            await new Promise(resolve => setTimeout(resolve, 200));
-            await cursor.performClick({ x, y });
-            await new Promise(resolve => setTimeout(resolve, 800));
-            // Verify
-            for (let i = 0; i < 5; i++) {
-              if (await isAppFrontmost(appName) || await isAppVisible(appName)) {
-                goalAchieved = true;
-                break;
-              }
-              await new Promise(r => setTimeout(r, 250));
-            }
-
-            // If still not open, try a second click at the same location (sometimes first click focuses Dock)
-            if (!goalAchieved) {
-              console.log('[VisualNav] First Dock click did not open app; retrying click');
-              await cursor.performClick({ x, y });
-              await new Promise(resolve => setTimeout(resolve, 1000));
-              for (let i = 0; i < 5; i++) {
-                if (await isAppFrontmost(appName) || await isAppVisible(appName)) {
-                  goalAchieved = true;
-                  break;
-                }
-                await new Promise(r => setTimeout(r, 250));
-              }
-            }
-
-            if (goalAchieved) { break; }
-          }
-          if (!goalAchieved) {
-            // Final fallback to Spotlight path
-            const display = screen.getPrimaryDisplay();
-            const screenWidth = display.bounds.width;
-            const spotlightX = screenWidth - 50;
-            const spotlightY = 25;
-            console.warn(`[VisualNav] Dock item not found via AX and AI coords did not achieve goal; falling back to Spotlight at (${spotlightX}, ${spotlightY})`);
-            await cursor.moveCursor({ x: spotlightX, y: spotlightY });
-            await new Promise(resolve => setTimeout(resolve, 150));
-            await cursor.performClick({ x: spotlightX, y: spotlightY });
-            await new Promise(resolve => setTimeout(resolve, 200));
-            await runAppleScript(`tell application \"System Events\" to keystroke space using command down`);
-            await new Promise(resolve => setTimeout(resolve, 600));
-            await runAppleScript(`tell application \"System Events\" to keystroke \"${appName}\"`);
-            await new Promise(resolve => setTimeout(resolve, 300));
-            await runAppleScript(`tell application \"System Events\" to keystroke return`);
-            await new Promise(resolve => setTimeout(resolve, 1200));
-            for (let i = 0; i < 5; i++) {
-              if (await isAppFrontmost(appName) || await isAppVisible(appName)) {
-                goalAchieved = true;
-                break;
-              }
-              await new Promise(r => setTimeout(r, 300));
-            }
-            if (goalAchieved) { break; }
-          }
-        }
-      } else if (aiResponse.includes("CLICK_SPOTLIGHT:")) {
-        // Parse coordinates if provided, otherwise compute dynamic top-right
-        const spotlightMatch = aiResponse.match(/CLICK_SPOTLIGHT:\s*\{?\s*(-?\d+)\s*,\s*(-?\d+)\s*\}?/);
-        let spotlightX: number;
-        let spotlightY: number;
-        if (spotlightMatch) {
-          spotlightX = parseInt(spotlightMatch[1], 10);
-          spotlightY = parseInt(spotlightMatch[2], 10);
-        } else {
-          const display = screen.getPrimaryDisplay();
-          const screenWidth = display.bounds.width;
-          spotlightX = screenWidth - 50;  // 50px from right edge
-          spotlightY = 25;                // 25px from top
-        }
-        
-        // Before opening Spotlight, try AX-based Dock click again in case Dock is visible but model missed it
-        const axClicked = await clickDockItemIfAvailable(appName, cursor);
-        if (axClicked) {
-          goalAchieved = true;
-          continue;
-        }
-        
-        console.log(`[VisualNav] Opening Spotlight at (${spotlightX}, ${spotlightY})`);
-        await cursor.moveCursor({ x: spotlightX, y: spotlightY });
-        await new Promise(resolve => setTimeout(resolve, 150));
-        await cursor.performClick({ x: spotlightX, y: spotlightY });
-        await new Promise(resolve => setTimeout(resolve, 200));
-        await runAppleScript(`tell application \"System Events\" to keystroke space using command down`);
-        await new Promise(resolve => setTimeout(resolve, 600));
-        await runAppleScript(`tell application \"System Events\" to keystroke \"${appName}\"`);
-        await new Promise(resolve => setTimeout(resolve, 300));
-        await runAppleScript(`tell application \"System Events\" to keystroke return`);
-        await new Promise(resolve => setTimeout(resolve, 1200));
-        for (let i = 0; i < 5; i++) {
-          if (await isAppFrontmost(appName) || await isAppVisible(appName)) {
-            goalAchieved = true;
-            break;
-          }
-          await new Promise(r => setTimeout(r, 300));
-        }
-        if (goalAchieved) { break; }
-      } else if (aiResponse.includes("CLICK_LAUNCHPAD:")) {
-        try {
-          const coordsMatch = aiResponse.match(/CLICK_LAUNCHPAD:\s*\{?\s*(-?\d+)\s*,\s*(-?\d+)\s*\}?/);
-          if (coordsMatch) {
-            const x = parseInt(coordsMatch[1], 10);
-            const y = parseInt(coordsMatch[2], 10);
-            console.log(`[VisualNav] Clicking Launchpad at (${x}, ${y})`);
-            await cursor.moveCursor({ x, y });
-            await new Promise(resolve => setTimeout(resolve, 150));
-            await cursor.performClick({ x, y });
-            await new Promise(resolve => setTimeout(resolve, 800)); // wait for launchpad to open
-          } else {
-            console.warn('[VisualNav] Could not parse coordinates from CLICK_LAUNCHPAD response');
-          }
-        } catch (e) {
-          console.error('[VisualNav] Error executing CLICK_LAUNCHPAD:', e);
-        }
-      }
-      
-    } catch (error) {
-      console.error(`[VisualNav] Error in attempt ${attempt}:`, error);
-    }
-    
-    // Brief pause between attempts
-    await new Promise(resolve => setTimeout(resolve, 500));
-  }
-  
-  if (goalAchieved) {
-    console.log(`[VisualNav] Successfully opened ${appName} using visual navigation`);
+    console.log(`[VisualNav] ❌ Failed to open ${appName} with all methods`);
     event.sender.send("reply", {
-      type: "success",
-      message: `${appName} opened successfully using visual navigation!`,
+      type: "error",
+      message: `Could not open ${appName}. Please ensure the app is installed.`,
     });
-  } else {
-    console.log(`[VisualNav] Failed to open ${appName} after ${maxAttempts} attempts`);
-    
-    // Final native fallback: try to open the app directly
-    try {
-      const child_process = await import("child_process");
-      const { exec: cpExec } = child_process;
-      const execPromise = (cmd: string) => new Promise((resolve, reject) => cpExec(cmd, (err, stdout, stderr) => err ? reject(err) : resolve({ stdout, stderr })));
-      await execPromise(`open -a "${appName}"` as any);
-      console.log(`[VisualNav] Native open fallback succeeded for ${appName}`);
-      event.sender.send("reply", { type: "success", message: `${appName} opened (fallback).` });
-    } catch (nativeErr) {
-      console.error(`[VisualNav] Native open fallback failed:`, nativeErr);
-      event.sender.send("reply", {
-        type: "error",
-        message: `Could not visually navigate to open ${appName}`,
-      });
-    }
+  } catch (nativeErr) {
+    console.error(`[VisualNav] Native fallback failed:`, nativeErr);
+    event.sender.send("reply", {
+      type: "error",
+      message: `Could not open ${appName}. Please ensure the app is installed.`,
+    });
   }
 
-  console.log(`[VisualNav] Visual navigation session ended`);
+  console.log(`[VisualNav] 🎯 Spotlight-based navigation session ended`);
 }
 
 // Helper: Try to click Dock item via Accessibility (no hardcoded coords)
