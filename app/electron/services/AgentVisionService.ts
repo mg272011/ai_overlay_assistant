@@ -3,7 +3,7 @@ import { takeAndSaveScreenshots } from '../utils/screenshots';
 import { getVirtualCursor } from '../performAction';
 import { execPromise } from '../utils/utils';
 import * as path from 'path';
-import { app } from 'electron';
+import { app, screen } from 'electron';
 
 interface ActionResult {
   success: boolean;
@@ -80,32 +80,12 @@ export class AgentVisionService {
   ): Promise<ActionResult> {
     const cursor = getVirtualCursor();
     
-    // Move virtual cursor smoothly to target (visual only)
+    // Move virtual cursor smoothly to target
     await cursor.moveCursor({ x, y });
     await new Promise(resolve => setTimeout(resolve, 200));
     
-    // Show click animation (visual only)
+    // Perform click (VirtualCursor handles the actual Swift click)
     await cursor.performClick({ x, y });
-    
-    // Perform the ACTUAL click using Swift
-    try {
-      const swiftScriptPath = path.join(app.getAppPath(), 'swift', 'clickAtCoordinates.swift');
-      const { stdout, stderr } = await execPromise(`swift ${swiftScriptPath} ${x} ${y}`);
-      
-      if (stdout) {
-        console.log('[AgentVision] Swift click output:', stdout.trim());
-      }
-      if (stderr) {
-        console.error('[AgentVision] Swift click error:', stderr);
-      }
-    } catch (error) {
-      console.error('[AgentVision] Failed to perform Swift click:', error);
-      return {
-        success: false,
-        message: `Failed to click at (${x}, ${y}): ${error}`,
-        coordinates: { x, y }
-      };
-    }
     
     await new Promise(resolve => setTimeout(resolve, this.screenshotDelay));
     
@@ -293,39 +273,55 @@ export class AgentVisionService {
 
   private async openViaSpotlight(appName: string): Promise<ActionResult> {
     console.log(`[AgentVision] Trying Spotlight method...`);
-    const cursor = getVirtualCursor();
     
-    // Open Spotlight
-    await execPromise(`swift ${path.join(app.getAppPath(), 'swift', 'key.swift')} com.apple.finder "^cmd+space"`);
-    await new Promise(resolve => setTimeout(resolve, 800));
-    
-    // Find and click input field
-    const inputResult = await this.findAndClickText('Spotlight Search', 
-      'Find the Spotlight search input field in the center of the screen');
-    
-    if (!inputResult.success) {
-      return { success: false, message: 'Could not find Spotlight input' };
+    // Open Spotlight with Cmd+Space
+    try {
+      await execPromise(`swift ${path.join(app.getAppPath(), 'swift', 'key.swift')} com.apple.finder "^cmd+space"`);
+      await new Promise(resolve => setTimeout(resolve, 500));
+    } catch (error) {
+      console.error('[AgentVision] Failed to open Spotlight:', error);
+      return { success: false, message: 'Could not open Spotlight' };
     }
     
+    // Take screenshot to find Spotlight
+    const screenshot = await this.takeScreenshot();
+    if (!screenshot) {
+      return { success: false, message: 'Could not take screenshot' };
+    }
+    
+    // Click in the center of Spotlight (it usually appears there)
+    const display = screen.getPrimaryDisplay();
+    const { width: screenWidth, height: screenHeight } = display.bounds;
+    const centerX = Math.round(screenWidth / 2);
+    const centerY = Math.round(screenHeight / 3); // Upper third of screen
+    
+    const cursor = getVirtualCursor();
+    await cursor.moveCursor({ x: centerX, y: centerY });
+    await new Promise(resolve => setTimeout(resolve, 200));
+    await cursor.performClick({ x: centerX, y: centerY });
+    await new Promise(resolve => setTimeout(resolve, 300));
+    
     // Type app name
-    await execPromise(`swift ${path.join(app.getAppPath(), 'swift', 'key.swift')} com.apple.Spotlight "${appName}"`);
-    await new Promise(resolve => setTimeout(resolve, 800));
-    
-    // Find and click app result
-    const appResult = await this.findAndClickText(appName,
-      `Find the search result for "${appName}" application in Spotlight results`);
-    
-    if (appResult.success) {
+    try {
+      await execPromise(`swift ${path.join(app.getAppPath(), 'swift', 'key.swift')} com.apple.Spotlight "${appName}"`);
       await new Promise(resolve => setTimeout(resolve, 1000));
+    } catch (error) {
+      console.error('[AgentVision] Failed to type app name:', error);
+    }
+    
+    // Press Enter to open the first result
+    try {
+      await execPromise(`swift ${path.join(app.getAppPath(), 'swift', 'key.swift')} com.apple.Spotlight "^enter"`);
+      await new Promise(resolve => setTimeout(resolve, 1500));
+      
       return {
         success: true,
         message: `Opened ${appName} via Spotlight`
       };
+    } catch (error) {
+      console.error('[AgentVision] Failed to press Enter:', error);
+      return { success: false, message: 'Could not confirm app opening' };
     }
-    
-    // Close Spotlight if failed
-    await execPromise(`swift ${path.join(app.getAppPath(), 'swift', 'key.swift')} com.apple.finder "^escape"`);
-    return { success: false, message: 'Could not find app in Spotlight' };
   }
 
   private async openViaDock(appName: string): Promise<ActionResult> {

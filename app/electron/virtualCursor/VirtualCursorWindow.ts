@@ -252,17 +252,18 @@ export class VirtualCursorWindow {
   async performClick(position: CursorPosition): Promise<void> {
     if (!this.window) return;
 
-    console.log(`[VirtualCursorWindow] performClick called at (${position.x}, ${position.y}) - VISUAL ONLY`);
+    console.log(`[VirtualCursorWindow] performClick called at (${position.x}, ${position.y})`);
     
     // Ensure cursor is visible above everything (especially Spotlight)
     this.bringToFront();
 
-    // Show click animation (visual only)
+    // Show click animation
     this.window.webContents.send("show-click-animation", position);
 
-    // DO NOT perform actual click - the virtual cursor is only for visual feedback
-    // The actual clicking is handled by the AgentVisionService using Swift tools
-    console.log(`[VirtualCursorWindow] Visual click animation shown, no actual click performed`);
+    // Perform the actual click using Swift (needed for agent mode to work)
+    await this.performClickWithSwift(position);
+    
+    console.log(`[VirtualCursorWindow] Click performed at (${position.x}, ${position.y})`);
   }
 
   // Visual click animation only (no actual clicking)
