@@ -1,2 +1,22 @@
 .DS_Store
 .vercel
+
+# Environment files
+.env
+.env.*
+!.env.template
+!.env.example
+
+# Backup files
+*.backup
+
+# Node modules
+node_modules/
+
+# Build outputs
+dist/
+build/
+
+# IDE files
+.vscode/
+.idea/

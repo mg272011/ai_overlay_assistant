@@ -7,11 +7,9 @@ import { logWithElapsed } from "../utils/utils";
 import getApplescriptCommands from "../utils/getApplescriptCommands";
 
 // TEMPORARY HARDCODED FOR TESTING - DO NOT COMMIT THIS!
-// const openai = new OpenAI();
-
-// HARDCODED API KEY - REMOVE BEFORE COMMITTING
+// Initialize OpenAI with API key from environment variable
 const openai = new OpenAI({
-  apiKey: 'YOUR_API_KEY_HERE' // <-- PUT YOUR ACTUAL KEY HERE
+  apiKey: process.env.OPENAI_API_KEY
 });
 
 export async function* runActionAgentStreaming(
