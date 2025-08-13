@@ -26,7 +26,7 @@ export class ListenView extends LitElement {
       color: #fff;
       box-sizing: border-box;
       position: relative;
-      background: rgba(45, 45, 50, 0.18); /* Slightly more visible to ensure bottom shows */
+      background: linear-gradient(135deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0.05) 50%, rgba(255, 255, 255, 0.15) 100%); /* Liquid glass like mainbar */
       overflow: hidden;
       border-radius: 12px;
       width: 100%;
@@ -34,10 +34,10 @@ export class ListenView extends LitElement {
       min-height: 380px; /* Ensure minimum height for content */
       max-height: 420px; /* Slightly increased */
       pointer-events: auto;
-      border: none;
-      backdrop-filter: blur(8px) saturate(250%) contrast(150%) brightness(115%);
-      -webkit-backdrop-filter: blur(8px) saturate(250%) contrast(150%) brightness(115%);
-      box-shadow: none;
+      border: 0.5px solid rgba(255, 255, 255, 0.3);
+      backdrop-filter: blur(20px) saturate(180%) contrast(120%) brightness(110%) hue-rotate(5deg);
+      -webkit-backdrop-filter: blur(20px) saturate(180%) contrast(120%) brightness(110%) hue-rotate(5deg);
+      box-shadow: 0 8px 32px rgba(31, 38, 135, 0.15), 0 4px 16px rgba(255, 255, 255, 0.1) inset, inset 0 2px 0 rgba(255, 255, 255, 0.6), inset 0 -2px 0 rgba(255, 255, 255, 0.2), inset 0 0 20px 10px rgba(255, 255, 255, 0.08);
     }
 
     .assistant-container::after {
@@ -218,6 +218,9 @@ export class ListenView extends LitElement {
         }
       });
     }
+    
+    // ✅ ADD MISSING EVENT LISTENER FOR MEETING ACTIONS
+    this.addEventListener('meeting-action-clicked', this.handleMeetingActionClicked.bind(this));
   }
 
   disconnectedCallback() {
@@ -225,6 +228,9 @@ export class ListenView extends LitElement {
     this.stopTimer();
     if (this.adjustHeightThrottle) { clearTimeout(this.adjustHeightThrottle); this.adjustHeightThrottle = null; }
     if (this.copyTimeout) { clearTimeout(this.copyTimeout); }
+    
+    // ✅ REMOVE EVENT LISTENER
+    this.removeEventListener('meeting-action-clicked', this.handleMeetingActionClicked.bind(this));
   }
 
   startTimer() {
@@ -271,6 +277,48 @@ export class ListenView extends LitElement {
     this.adjustWindowHeight();
     this.isThrottled = true;
     this.adjustHeightThrottle = setTimeout(() => { this.isThrottled = false; }, 16);
+  }
+
+  // ✅ HANDLE MEETING ACTION CLICKS - THE MISSING PIECE!
+  handleMeetingActionClicked(event) {
+    console.log('[ListenView] 🔍 Meeting action clicked:', event.detail);
+    
+    const { type, text, query, actionType } = event.detail;
+    
+    // Generate unique chat ID for this action
+    const chatId = `meeting-chat-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    
+    // Determine action type and prepare action object
+    let action;
+    if (type === 'search' || actionType === 'search') {
+      action = {
+        type: 'search',
+        query: query || text,
+        text: text
+      };
+    } else if (type === 'say-next' || actionType === 'say-next') {
+      action = {
+        type: 'say-next',
+        text: text || 'What should I say next?'
+      };
+    } else {
+      // Default to search for any other action
+      action = {
+        type: 'search',
+        query: text,
+        text: text
+      };
+    }
+    
+    console.log('[ListenView] 🚀 Starting meeting chat with action:', action);
+    
+    // Send IPC message to start meeting chat
+    if (window.electronAPI?.send) {
+      window.electronAPI.send('start-meeting-chat', { chatId, action });
+      console.log('[ListenView] ✅ Sent start-meeting-chat IPC message');
+    } else {
+      console.error('[ListenView] ❌ electronAPI.send not available');
+    }
   }
 
   updated(changedProps) { super.updated(changedProps); if (changedProps.has('viewMode')) this.adjustWindowHeight(); }
