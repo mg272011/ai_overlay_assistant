@@ -415,10 +415,24 @@ export function setupMainHandlers({ win }: { win: InstanceType<typeof BrowserWin
 
       // Stream fake chunks for UX while fetching
       const send = (type: string, content?: string) => {
-        console.log(`[MeetingChat] send() called with type: ${type}, content length: ${content?.length || 0}`);
-        console.log(`[MeetingChat] send() content preview: ${content?.substring(0, 100) || '(no content)'}...`);
-        mainWindow?.webContents.send('meeting-chat-stream', { chatId, type, content });
-        console.log(`[MeetingChat] sent meeting-chat-stream event to renderer`);
+        console.log(`[MeetingChat] 📤 ===== SEND FUNCTION CALLED =====`);
+        console.log(`[MeetingChat] 📤 Type: ${type}`);
+        console.log(`[MeetingChat] 📤 Content length: ${content?.length || 0}`);
+        console.log(`[MeetingChat] 📤 Raw content: ${JSON.stringify(content)}`);
+        console.log(`[MeetingChat] 📤 Chat ID: ${chatId}`);
+        console.log(`[MeetingChat] 📤 MainWindow exists: ${!!mainWindow}`);
+        console.log(`[MeetingChat] 📤 MainWindow webContents exists: ${!!mainWindow?.webContents}`);
+        
+        const payload = { chatId, type, content };
+        console.log(`[MeetingChat] 📤 Payload being sent: ${JSON.stringify(payload)}`);
+        
+        try {
+          mainWindow?.webContents.send('meeting-chat-stream', payload);
+          console.log(`[MeetingChat] 📤 ✅ Successfully sent meeting-chat-stream event to renderer`);
+        } catch (sendError) {
+          console.error(`[MeetingChat] 📤 ❌ Error sending to renderer:`, sendError);
+        }
+        console.log(`[MeetingChat] 📤 ===== SEND FUNCTION COMPLETED =====`);
       };
 
       if (action?.type === 'say-next') {
@@ -483,13 +497,22 @@ ${seed}`;
       // For search actions: use Gemini 2.5 Flash for faster, longer responses
       if (action?.type === 'search' && (action?.query || action?.text)) {
         const searchQuery = action.query || action.text;
-        console.log('[MeetingChat] Processing search action:', searchQuery);
+        console.log('[MeetingChat] 🔍 ===== SEARCH ACTION STARTED =====');
+        console.log('[MeetingChat] 🔍 Search query:', searchQuery);
+        console.log('[MeetingChat] 🔍 Chat ID:', chatId);
+        console.log('[MeetingChat] 🔍 Action object:', JSON.stringify(action, null, 2));
         
         try {
           const geminiKey = process.env.GEMINI_API_KEY;
+          console.log('[MeetingChat] 🔍 GEMINI_API_KEY present:', !!geminiKey);
+          console.log('[MeetingChat] 🔍 GEMINI_API_KEY length:', geminiKey ? geminiKey.length : 0);
+          
           if (geminiKey) {
+            console.log('[MeetingChat] 🔍 Importing GoogleGenerativeAI...');
             const { GoogleGenerativeAI } = await import("@google/generative-ai");
+            console.log('[MeetingChat] 🔍 Creating GenAI instance...');
             const genAI = new GoogleGenerativeAI(geminiKey);
+            console.log('[MeetingChat] 🔍 Getting model...');
             const model = genAI.getGenerativeModel({ 
               model: "gemini-2.5-flash",
               generationConfig: {
@@ -497,6 +520,7 @@ ${seed}`;
                 maxOutputTokens: 150, // 3-4 sentences
               }
             });
+            console.log('[MeetingChat] 🔍 Model configured successfully');
             
             const prompt = `You are a helpful assistant performing a web search for the user. 
 Write exactly 3-4 clear, informative sentences answering the query.
@@ -507,30 +531,55 @@ Web search query: "${searchQuery}"
 Provide a concise response in 3-4 sentences.`;
             
             // Generate response
-            console.log('[MeetingChat] Calling Gemini with prompt:', prompt);
-            const result = await model.generateContent(prompt);
-            const fullResponse = result.response.text();
-            console.log('[MeetingChat] Got Gemini response:', fullResponse.substring(0, 100) + '...');
+            console.log('[MeetingChat] 🔍 Calling Gemini with prompt length:', prompt.length);
+            console.log('[MeetingChat] 🔍 Full prompt:', prompt);
             
+            console.log('[MeetingChat] 🔍 Making API call to Gemini...');
+            const result = await model.generateContent(prompt);
+            console.log('[MeetingChat] 🔍 API call completed, processing result...');
+            
+            const fullResponse = result.response.text();
+            console.log('[MeetingChat] 🔍 RAW FULL RESPONSE:', JSON.stringify(fullResponse));
+            console.log('[MeetingChat] 🔍 Response length:', fullResponse.length);
+            console.log('[MeetingChat] 🔍 Response preview:', fullResponse.substring(0, 200));
+            
+            if (!fullResponse || fullResponse.trim().length === 0) {
+              console.error('[MeetingChat] 🔍 ❌ EMPTY RESPONSE FROM GEMINI!');
+              send('text', 'I received an empty response. Please try your search again.');
+              send('stream_end');
+              return;
+            }
+            
+            console.log('[MeetingChat] 🔍 Starting to stream response...');
             // Stream the response in chunks for better UX
             const chunkSize = 50; // Characters per chunk
+            let totalSent = 0;
             for (let i = 0; i < fullResponse.length; i += chunkSize) {
               const chunk = fullResponse.slice(i, i + chunkSize);
+              console.log('[MeetingChat] 🔍 Sending chunk:', JSON.stringify(chunk));
               send('text', chunk);
+              totalSent += chunk.length;
               await new Promise(resolve => setTimeout(resolve, 20)); // Small delay for streaming effect
             }
             
+            console.log('[MeetingChat] 🔍 Total characters sent:', totalSent);
+            console.log('[MeetingChat] 🔍 Sending stream_end...');
             send('stream_end');
-            console.log('[MeetingChat] Search response completed');
+            console.log('[MeetingChat] 🔍 ===== SEARCH ACTION COMPLETED =====');
           } else {
             // Fallback if no Gemini key
             send('text', `I would search for: "${searchQuery}"\n\nUnfortunately, I need a Gemini API key configured to provide search results.`);
             send('stream_end');
           }
         } catch (err) {
-          console.error('[MeetingChat] Search failed:', err);
-          send('text', `Search for "${searchQuery}" - Unable to complete search at this time.`);
+          console.error('[MeetingChat] 🔍 ❌ ===== SEARCH FAILED =====');
+          console.error('[MeetingChat] 🔍 ❌ Error object:', err);
+          console.error('[MeetingChat] 🔍 ❌ Error message:', err instanceof Error ? err.message : String(err));
+          console.error('[MeetingChat] 🔍 ❌ Error stack:', err instanceof Error ? err.stack : 'No stack trace');
+          console.log('[MeetingChat] 🔍 ❌ Sending fallback response...');
+          send('text', `Search for "${searchQuery}" - Unable to complete search at this time. Error: ${err instanceof Error ? err.message : String(err)}`);
           send('stream_end');
+          console.log('[MeetingChat] 🔍 ❌ ===== SEARCH ERROR HANDLING COMPLETED =====');
         }
         return;
       }
@@ -1877,53 +1926,98 @@ async function performVisualNavigation(appName: string, cursor: ReturnType<typeo
     return;
   }
 
-  // NEW APPROACH: Use Spotlight search for reliable app opening
+  // VISION-GUIDED SPOTLIGHT NAVIGATION 
   try {
-    console.log(`[VisualNav] 🎯 Using Spotlight-based approach for ${appName}`);
+    console.log(`[VisualNav] 🎯 Using vision-guided Spotlight approach for ${appName}`);
     
-    // Step 1: Move cursor to center of screen for visibility
+    // Step 1: Ensure cursor is always visible on top
+    console.log(`[VisualNav] Ensuring cursor is always visible...`);
+    await cursor.show(); // Make sure cursor window is visible and on top
+    
+    // Step 2: Move cursor to middle of screen (bit higher as requested)
     const display = screen.getPrimaryDisplay();
     const centerX = Math.floor(display.bounds.width / 2);
-    const centerY = Math.floor(display.bounds.height / 2);
+    const centerY = Math.floor(display.bounds.height * 0.4); // Bit higher than center
     
-    console.log(`[VisualNav] Moving cursor to screen center (${centerX}, ${centerY})`);
+    console.log(`[VisualNav] Moving cursor to screen middle-high (${centerX}, ${centerY})`);
     await cursor.moveCursor({ x: centerX, y: centerY });
-    await new Promise(resolve => setTimeout(resolve, 200));
-    
-    // Step 2: Open Spotlight with Cmd+Space
-    console.log(`[VisualNav] Opening Spotlight search...`);
-    await runAppleScript(`tell application "System Events" to keystroke space using command down`);
-    await new Promise(resolve => setTimeout(resolve, 800)); // Wait for Spotlight to open
-    
-    // Step 3: Move mouse to Spotlight input field and click it
-    console.log(`[VisualNav] Moving mouse to Spotlight input field...`);
-    // Spotlight input is typically at the center-top of the screen
-    const inputX = centerX; // Center horizontally
-    const inputY = Math.floor(display.bounds.height * 0.25); // About 25% down from top
-    
-    await cursor.moveCursor({ x: inputX, y: inputY });
     await new Promise(resolve => setTimeout(resolve, 300));
     
-    console.log(`[VisualNav] Clicking Spotlight input field at (${inputX}, ${inputY})...`);
-    await cursor.performClick({ x: inputX, y: inputY });
-    await new Promise(resolve => setTimeout(resolve, 200));
+    // Step 3: Open Spotlight with Cmd+Space (click should be higher)
+    console.log(`[VisualNav] Opening Spotlight search...`);
+    await runAppleScript(`tell application "System Events" to keystroke space using command down`);
+    await new Promise(resolve => setTimeout(resolve, 1000)); // Wait for Spotlight to open
     
-    // Step 4: Type the app name into the input field
+    // Step 4: Use vision to find and click Spotlight input field
+    console.log(`[VisualNav] 👁️ Using vision to find Spotlight input field...`);
+    const { GeminiVisionService } = await import("./services/GeminiVisionService");
+    const visionService = new GeminiVisionService();
+    
+    // Create temp folder for screenshot
+    const timestampFolder = createLogFolder(`spotlight-${Date.now()}`);
+    
+    try {
+      const screenshot = await takeAndSaveScreenshots("Desktop", timestampFolder);
+      
+      if (screenshot) {
+      
+      const inputResult = await visionService.analyzeScreenForElement(
+        screenshot,
+        "Spotlight search input field or search box at the top center of the screen"
+      );
+      
+      if (inputResult.found && inputResult.x && inputResult.y) {
+        console.log(`[VisualNav] 👁️ Vision found input field at (${inputResult.x}, ${inputResult.y})`);
+        await cursor.moveCursor({ x: inputResult.x, y: inputResult.y });
+        await new Promise(resolve => setTimeout(resolve, 300));
+        await cursor.performClick({ x: inputResult.x, y: inputResult.y });
+      } else {
+        // Fallback to estimated position if vision fails
+        console.log(`[VisualNav] Vision failed, using fallback position`);
+        const inputX = centerX;
+        const inputY = Math.floor(display.bounds.height * 0.22); // Higher as requested
+        await cursor.moveCursor({ x: inputX, y: inputY });
+        await new Promise(resolve => setTimeout(resolve, 300));
+        await cursor.performClick({ x: inputX, y: inputY });
+      }
+    }
+    
+    // Step 5: Wait a second, then type the app name
+    await new Promise(resolve => setTimeout(resolve, 1000)); // Wait as requested
     console.log(`[VisualNav] Typing "${appName}" into Spotlight...`);
     await runAppleScript(`tell application "System Events" to keystroke "${appName}"`);
-    await new Promise(resolve => setTimeout(resolve, 1000)); // Wait for search results to populate
     
-    // Step 5: Move mouse to first search result and click it
-    console.log(`[VisualNav] Moving mouse to first search result...`);
-    // First result is typically below the input field
-    const resultX = centerX; // Center horizontally  
-    const resultY = Math.floor(display.bounds.height * 0.35); // About 35% down from top
+    // Step 6: Wait a second for search results
+    await new Promise(resolve => setTimeout(resolve, 1000)); // Wait as requested
     
-    await cursor.moveCursor({ x: resultX, y: resultY });
-    await new Promise(resolve => setTimeout(resolve, 500)); // Wait a second as requested
+    // Step 7: Use vision to find and click the app
+    console.log(`[VisualNav] 👁️ Using vision to find ${appName} in search results...`);
+    const screenshot2 = await takeAndSaveScreenshots("Desktop", timestampFolder);
     
-    console.log(`[VisualNav] Clicking on ${appName} result at (${resultX}, ${resultY})...`);
-    await cursor.performClick({ x: resultX, y: resultY });
+    if (screenshot2) {
+      const appResult = await visionService.analyzeScreenForElement(
+        screenshot2,
+        `${appName} app icon or result in the Spotlight search results list`
+      );
+      
+      if (appResult.found && appResult.x && appResult.y) {
+        console.log(`[VisualNav] 👁️ Vision found ${appName} at (${appResult.x}, ${appResult.y})`);
+        await cursor.moveCursor({ x: appResult.x, y: appResult.y });
+        await new Promise(resolve => setTimeout(resolve, 300));
+        await cursor.performClick({ x: appResult.x, y: appResult.y });
+      } else {
+        // Fallback to estimated first result position
+        console.log(`[VisualNav] Vision failed, clicking estimated first result`);
+        const resultX = centerX;
+        const resultY = Math.floor(display.bounds.height * 0.32);
+        await cursor.moveCursor({ x: resultX, y: resultY });
+        await new Promise(resolve => setTimeout(resolve, 300));
+        await cursor.performClick({ x: resultX, y: resultY });
+      }
+    } catch (screenshotError) {
+      console.error(`[VisualNav] Screenshot failed:`, screenshotError);
+    }
+    
     await new Promise(resolve => setTimeout(resolve, 1500)); // Wait for app to launch
     
     // Step 5: Verify the app opened successfully
