@@ -2031,7 +2031,14 @@ async function performVisualNavigation(appName: string, cursor: ReturnType<typeo
         console.log(`[VisualNav] 👁️ Vision found Spotlight input at (${inputResult.x}, ${inputResult.y})`);
         await cursor.moveCursor({ x: inputResult.x, y: inputResult.y });
         await new Promise(resolve => setTimeout(resolve, 200));
-        await cursor.performClick({ x: inputResult.x, y: inputResult.y });
+                  // Use SwiftMouse for human-like click
+          try {
+            await SwiftMouse.click();
+            console.log('[Agent] Clicked with SwiftMouse');
+          } catch (swiftError) {
+            console.log('[Agent] SwiftMouse failed, using virtual cursor:', swiftError);
+            await cursor.performClick({ x: inputResult.x, y: inputResult.y });
+          }
       } else {
         // Fallback to typical Spotlight position
         const display = screen.getPrimaryDisplay();
@@ -2040,7 +2047,14 @@ async function performVisualNavigation(appName: string, cursor: ReturnType<typeo
         console.log(`[VisualNav] Using fallback Spotlight input position at (${inputX}, ${inputY})`);
         await cursor.moveCursor({ x: inputX, y: inputY });
         await new Promise(resolve => setTimeout(resolve, 200));
-        await cursor.performClick({ x: inputX, y: inputY });
+                  // Use SwiftMouse for human-like click
+          try {
+            await SwiftMouse.click();
+            console.log('[Agent] Clicked with SwiftMouse');
+          } catch (swiftError) {
+            console.log('[Agent] SwiftMouse failed, using virtual cursor:', swiftError);
+            await cursor.performClick({ x: inputX, y: inputY });
+          }
       }
     }
     
@@ -2064,7 +2078,14 @@ async function performVisualNavigation(appName: string, cursor: ReturnType<typeo
         console.log(`[VisualNav] 👁️ Vision found ${appName} at (${appResult.x}, ${appResult.y})`);
         await cursor.moveCursor({ x: appResult.x, y: appResult.y });
         await new Promise(resolve => setTimeout(resolve, 200));
-        await cursor.performClick({ x: appResult.x, y: appResult.y });
+                  // Use SwiftMouse for human-like click
+          try {
+            await SwiftMouse.click();
+            console.log('[Agent] Clicked app with SwiftMouse');
+          } catch (swiftError) {
+            console.log('[Agent] SwiftMouse failed, using virtual cursor:', swiftError);
+            await cursor.performClick({ x: appResult.x, y: appResult.y });
+          }
       } else {
         // Fallback to first result
               const display = screen.getPrimaryDisplay();
