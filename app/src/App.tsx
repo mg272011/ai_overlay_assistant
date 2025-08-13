@@ -15,7 +15,7 @@ function App() {
   const currentStreamRef = useRef("");
   const inputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const lastMicClickRef = useRef<number>(0);
+  const lastMicClickRef = useRef<number>(0); void lastMicClickRef;
   const listenViewRef = useRef<any>(null);
   const sayNextActiveRef = useRef<boolean>(false);
   const highlightScrollRef = useRef<HTMLDivElement | null>(null);
@@ -102,15 +102,18 @@ function App() {
           if (data.type === 'text') {
             chat.streaming = true;
             chat.currentStream = (chat.currentStream || '') + (data.content || '');
+            console.log(`[ActionChat] Received text for ${data.chatId}:`, data.content, 'Total so far:', chat.currentStream);
           } else if (data.type === 'stream_end') {
             chat.streaming = false;
-            if (chat.currentStream.trim()) {
+            console.log(`[ActionChat] Stream ended for ${data.chatId}, currentStream:`, chat.currentStream);
+            if (chat.currentStream && chat.currentStream.trim()) {
               // For say-next, replace instead of stacking
               if ((chat as any).sayNext) {
                 chat.messages = [{ role: 'assistant', content: chat.currentStream.trim() }];
               } else {
                 chat.messages.push({ role: 'assistant', content: chat.currentStream.trim() });
               }
+              console.log(`[ActionChat] Added message for ${data.chatId}:`, chat.currentStream.trim());
               chat.currentStream = '';
             }
           }
@@ -265,6 +268,8 @@ function App() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, currentStream]);
+
+
 
   // Auto-scroll highlight panel to bottom when streaming or typewriter updates
   useEffect(() => {
@@ -828,8 +833,11 @@ function App() {
   return (
     <div className="w-full h-full flex flex-col items-center justify-start gap-1 pt-2 bg-transparent pointer-events-none">
       {/* Clonely-style Mainbar */}
-      <div id="mainbar" className="glass mainbar-glass liquid-frost rounded-full font-sans flex-none w-[28vw] h-[5.5vh] max-w-[28vw] max-h-[5.5vh] px-2 pointer-events-auto">
-                  <div className="flex items-center justify-center gap-1.5 w-full h-full">
+      <div id="mainbar" className="glass mainbar-glass liquid-frost rounded-full font-sans flex-none w-[30vw] h-[6vh] max-w-[30vw] max-h-[6vh] px-3 pointer-events-auto app-region-drag">
+        {/* Draggable areas on the sides */}
+        <div className="absolute left-0 top-0 w-8 h-full app-region-drag pointer-events-auto"></div>
+        <div className="absolute right-0 top-0 w-8 h-full app-region-drag pointer-events-auto"></div>
+        <div className="flex items-center justify-center gap-2 w-full h-full relative z-10">
           {/* Left - Chat button */}
           <button
             type="button"
@@ -889,6 +897,9 @@ function App() {
             )}
           </button>
 
+          {/* Draggable spacer */}
+          <div className="w-2 h-full app-region-drag pointer-events-auto"></div>
+
           {/* Agent button - matches Chat button style */}
           <button
             type="button"
@@ -928,6 +939,9 @@ function App() {
             <span>Agent</span>
           </button>
 
+          {/* Draggable spacer */}
+          <div className="w-2 h-full app-region-drag pointer-events-auto"></div>
+
           {/* NEW: Screen Highlight button */}
           <button
             type="button"
@@ -962,7 +976,8 @@ function App() {
             {null}
           </button>
 
-
+          {/* Draggable spacer */}
+          <div className="w-2 h-full app-region-drag pointer-events-auto"></div>
 
           {/* Listen button */}
            <button
@@ -1037,7 +1052,8 @@ function App() {
              <span className="eq" aria-hidden="true" style={{alignSelf:'center'}}><span></span><span></span><span></span></span>
           </button>
 
-
+          {/* Draggable spacer */}
+          <div className="w-2 h-full app-region-drag pointer-events-auto"></div>
 
           {/* 3-dots menu */}
           <div
@@ -1125,7 +1141,7 @@ function App() {
       {/* AI Pane - Stays open when agent is working */}
       <div id="chat-pane" className={`overflow-hidden liquid-animate ${
         (isChatPaneVisible || isStreaming || messages.length > 0 || highlightChatVisible || meetingChats.length > 0) ? 'max-h-[70vh] opacity-100 liquid-open' : 'max-h-0 opacity-0 liquid-closed'
-      } px-4 ${isLiveMode ? 'w-[60vw]' : 'w-[40vw]'} pointer-events-auto`}>
+      } px-4 ${isLiveMode ? 'w-[70vw]' : 'w-[40vw]'} pointer-events-auto`}>
         <div className={`max-h-full w-full bg-transparent p-2 gap-3 ${isLiveMode ? 'meeting-panels' : 'flex'}`}>
           {/* Left Panel - Transcript (only in live mode) - CENTERED by default */}
           {isLiveMode && (
@@ -1138,13 +1154,21 @@ function App() {
           {(meetingChats.length > 0 || isLiveMode) && meetingChats.length > 0 && (
             <div className={`flex-1 flex flex-col h-full gap-2 min-w-0 text-sm sidebar-panel items-start`}>
               {/* Meeting Action Chat Threads */}
-              <div className="flex flex-col gap-2 w-[380px] min-w-[340px] max-w-[400px]">
+              <div className="flex flex-col gap-2 w-full max-w-[400px]" style={{ overflow: 'visible' }}>
                 {meetingChats.map((chat) => (
-                  <div key={chat.id} className="glass liquid-panel rounded-lg p-3 relative" style={{ 
-                    background: 'rgba(52, 199, 89, 0.1)',
-                    backdropFilter: 'blur(8px) saturate(250%) contrast(150%) brightness(115%)',
-                    WebkitBackdropFilter: 'blur(8px) saturate(250%) contrast(150%) brightness(115%)'
-                  }}>
+                  <div 
+                    key={chat.id} 
+                    className="glass liquid-panel rounded-lg p-3 relative action-chat-panel" 
+                    style={{ 
+                      background: 'rgba(52, 199, 89, 0.1)',
+                      backdropFilter: 'blur(8px) saturate(250%) contrast(150%) brightness(115%)',
+                      WebkitBackdropFilter: 'blur(8px) saturate(250%) contrast(150%) brightness(115%)',
+                      height: 'auto',
+                      minHeight: '80px',
+                      overflow: 'visible',
+                      overflowWrap: 'break-word',
+                      wordBreak: 'break-word'
+                    }}>
                     <button
                       className="absolute top-2 right-2 text-white/70 hover:text-white z-10"
                       onClick={() => setMeetingChats((prev) => prev.filter((c) => c.id !== chat.id))}
@@ -1155,18 +1179,35 @@ function App() {
                         <path d="m6 6 12 12"/>
                       </svg>
                     </button>
-                    <div className="font-semibold mb-2 text-white pr-6">{chat.title}</div>
+                    <div className="font-semibold mb-2 text-white pr-6 text-sm">{chat.title}</div>
+                    
+
+                    
+                    {/* Show saved messages */}
                     {chat.messages.map((m, i) => (
-                      <div key={i} className="mb-2 text-white whitespace-pre-wrap">{m.content.replace(/^["']|["']$/g, '')}</div>
-                    ))}
-                    {chat.currentStream && (
-                      <div className="text-white whitespace-pre-wrap">
-                        {chat.currentStream}
-                        {chat.streaming && <span className="inline-block w-0.5 h-4 bg-white ml-1 animate-pulse"></span>}
+                      <div key={i} className="mb-3 text-white text-sm leading-relaxed break-words">
+                        {m.content.replace(/^["']|["']$/g, '')}
                       </div>
-                    )}
-                    {!chat.streaming && chat.messages.length === 0 && !chat.currentStream && (
-                      <div className="text-white/60 text-sm">Generating suggestions based on conversation...</div>
+                    ))}
+                    
+                    {/* Show streaming content or thinking state */}
+                    {chat.streaming && (
+                      <div className="text-white text-sm leading-relaxed break-words">
+                        {chat.currentStream ? (
+                          <>
+                            {chat.currentStream}
+                            <span className="inline-block w-0.5 h-4 bg-white ml-1 animate-pulse"></span>
+                          </>
+                        ) : (
+                          <div className="flex items-center gap-2 text-white/70">
+                            <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2"></circle>
+                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                            <span>Thinking...</span>
+                          </div>
+                        )}
+                      </div>
                     )}
                   </div>
                 ))}
@@ -1174,106 +1215,109 @@ function App() {
             </div>
           )}
 
-          {/* Highlight Chat Content (when active) */}
+          {/* Highlight Chat Content (when active) - Same size as regular chat */}
             {highlightChatVisible && highlightedImage && (
-              <div className="flex-1 glass liquid-panel rounded-2xl flex flex-col mt-4 relative min-h-0 pointer-events-auto">
-                {/* Small X button in top right corner */}
-                <button
-                  onClick={() => {
-                    setHighlightChatVisible(false);
-                    setHighlightedImage(null);
-                    setIsHighlightMode(false);
-                    setMessages([]);
-                    setCurrentStream("");
-                    // cleared
-                  }}
-                  className="absolute top-2 right-2 z-10 w-6 h-6 flex items-center justify-center rounded-full bg-gray-200 hover:bg-gray-300 transition-colors"
-                  title="Close"
-                >
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="text-gray-600">
-                    <path d="M18 6 6 18"/>
-                    <path d="m6 6 12 12"/>
-                  </svg>
-                </button>
-                
-                {/* Highlight Chat Header - text positioned lower */}
-                <div className="liquid-subheader flex items-center justify-between px-4 pt-4 pb-4 rounded-t-2xl">
-                  <div className="flex items-center gap-2 mt-4">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <rect width="18" height="18" x="3" y="3" rx="2" ry="2"/>
-                      <circle cx="9" cy="9" r="2"/>
-                      <path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/>
-                    </svg>
-                    <span className="text-sm font-medium text-white/90">
-                      Ask about highlighted content
-                    </span>
-                  </div>
-                </div>
-                
-                <div id="highlight-scroll" ref={highlightScrollRef as any} className="flex-1 p-4 overflow-y-auto max-h-[65vh] scroll-smooth text-sm leading-relaxed pb-6">
-                  {/* Show highlighted image */}
-                  <div className="mb-4 p-3 liquid-panel rounded-xl">
-                    <div className="font-semibold text-white/90 mb-3">Highlighted Content:</div>
-                    <div className="flex justify-center">
-                      <img 
-                        src={`data:image/png;base64,${highlightedImage}`}
-                        alt="Highlighted screen content"
-                        className="rounded-xl border border-white/20 shadow-sm"
-                        style={{ 
-                          maxWidth: '300px', 
-                          maxHeight: '150px',
-                          objectFit: 'contain'
+              <div className="flex-1 flex flex-col h-full gap-2 min-w-0 text-sm max-h-[65vh] pointer-events-auto mx-auto" style={{ width: '420px', minWidth: '380px', maxWidth: '440px' }}>
+                <div className="flex-1 glass liquid-panel rounded-2xl flex flex-col overflow-hidden">
+                  {/* Header with close button */}
+                  <div className="glass-chat-header px-4 pt-3 pb-2">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        {/* Small screenshot thumbnail */}
+                        <img 
+                          src={`data:image/png;base64,${highlightedImage}`}
+                          alt="Screenshot"
+                          className="rounded-md border border-white/20"
+                          style={{ 
+                            width: '24px', 
+                            height: '24px',
+                            objectFit: 'cover'
+                          }}
+                        />
+                      </div>
+                      {/* Close button */}
+                      <button
+                        onClick={() => {
+                          setHighlightChatVisible(false);
+                          setHighlightedImage(null);
+                          setIsHighlightMode(false);
+                          setMessages([]);
+                          setCurrentStream("");
                         }}
-                      />
+                        className="text-white/80 hover:text-white transition-colors p-1 rounded hover:bg-white/10"
+                        title="Close"
+                      >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M18 6 6 18"/>
+                          <path d="m6 6 12 12"/>
+                        </svg>
+                      </button>
                     </div>
                   </div>
                   
-                  {/* Chat messages for highlight */}
-                  {messages.map((msg, i) => (
-                    <div
-                      key={i}
-                      className={`mb-3 p-3 rounded-xl liquid-panel text-white/90`}
-                    >
-                      <div className="text-sm whitespace-pre-wrap">{msg.message}</div>
-                    </div>
-                  ))}
-
-                  {(isStreaming || currentStream) && (
-                    <div className="p-3 rounded-xl liquid-panel">
-                      <div className="font-semibold text-sm text-white/90 mb-1">
-                        {isStreaming ? "Analyzing..." : "Response"}
+                  <div className="flex-1 p-4 overflow-y-auto text-sm leading-relaxed" style={{ maxHeight: 'calc(65vh - 120px)' }}>
+                    {/* Chat messages for highlight */}
+                    {messages.map((msg, i) => (
+                      <div
+                        key={i}
+                        className={`mb-3 p-3 rounded-xl liquid-panel text-white/90`}
+                      >
+                        <div className="whitespace-pre-wrap">{msg.message}</div>
                       </div>
-                      <div className="text-sm text-white/90 whitespace-pre-wrap">
-                        {currentStream}
-                        {isStreaming && (
-                          <span className="inline-block w-0.5 h-4 bg-white ml-1 animate-pulse"></span>
-                        )}
-                      </div>
-                    </div>
-                  )}
+                    ))}
 
-                  {/* Typewriter reveal in highlight mode (like regular chat) */}
-                  {!isStreaming && highlightChatVisible && typewriterText && (
-                    <div className="p-3 rounded-xl liquid-panel">
-                      <div className="font-semibold text-sm text-white/90 mb-1">Response</div>
-                      <div className="text-sm text-white/90 whitespace-pre-wrap">{typewriterText}</div>
-                    </div>
-                  )}
-
-                  {!currentStream && messages.length === 0 && (
-                    <div className="flex flex-col items-center justify-center text-white/70 py-4">
-                      <div className="text-center">
-                        <p className="mb-3 text-white/90 font-medium">✨ Screenshot captured!</p>
-                        <p className="mb-3 text-white/80">Type your question about this content:</p>
-                        <div className="space-y-1 text-sm text-white/70">
-                          <p>• "What does this mean?"</p>
-                          <p>• "Explain this code"</p>
-                          <p>• "Summarize this text"</p>
-                          <p>• "How do I fix this error?"</p>
+                    {(isStreaming || currentStream) && (
+                      <div className="p-3 rounded-xl liquid-panel text-white/90">
+                        <div className="font-semibold mb-1">
+                          {isStreaming ? "Analyzing..." : "Response"}
+                        </div>
+                        <div className="whitespace-pre-wrap">
+                          {currentStream}
+                          {isStreaming && (
+                            <span className="inline-block w-0.5 h-4 bg-white ml-1 animate-pulse"></span>
+                          )}
                         </div>
                       </div>
-                    </div>
-                  )}
+                    )}
+
+                    {/* Typewriter reveal in highlight mode */}
+                    {!isStreaming && highlightChatVisible && typewriterText && (
+                      <div className="p-3 rounded-xl liquid-panel text-white/90">
+                        <div className="font-semibold mb-1">Response</div>
+                        <div className="whitespace-pre-wrap">{typewriterText}</div>
+                      </div>
+                    )}
+                    
+                    <div ref={messagesEndRef} />
+                  </div>
+                  
+                  {/* Input Area - Fixed at the bottom of the panel */}
+                  <div className="border-t border-white/10 p-3 bg-white/[0.02]">
+                    <form onSubmit={handleSubmit} className="relative">
+                      <input
+                        ref={inputRef}
+                        value={prompt}
+                        onChange={(e) => setPrompt(e.target.value)}
+                        placeholder="Ask about the screenshot..."
+                        disabled={isStreaming}
+                        onFocus={() => {
+                          window.ipcRenderer.send('chat:focus');
+                          if (inputRef.current) {
+                            inputRef.current.style.pointerEvents = 'auto';
+                          }
+                        }}
+                        className="glass-input pr-14 app-region-no-drag w-full"
+                      />
+                      <div className="absolute right-4 top-1/2 -translate-y-1/2">
+                        <div className="flex gap-2 items-center">
+                          <div className="flex gap-1 items-center opacity-70">
+                            <span className="text-xs">↵</span>
+                            <span className="text-xs">send</span>
+                          </div>
+                        </div>
+                      </div>
+                    </form>
+                  </div>
                 </div>
               </div>
             )}
@@ -1334,18 +1378,7 @@ function App() {
                    </div>
                  )}
 
-                 {!currentStream && messages.length === 0 && !typewriterText && (
-                   <div className="flex flex-col items-center justify-center text-white/70 py-8">
-                     <div className="text-center">
-                       <p className="mb-3 text-white/90 font-medium">
-                         {agentMode === 'chat' ? '✨ Ask me anything!' : '🤖 Agent ready to help'}
-                       </p>
-                       <p className="mb-3 text-white/80">
-                         {agentMode === 'chat' ? 'I can analyze your screen and answer questions' : 'I can help you with complex tasks'}
-                       </p>
-                     </div>
-                   </div>
-                 )}
+
                  
                  <div ref={messagesEndRef} />
                </div>
@@ -1390,42 +1423,7 @@ function App() {
               </div>
             </div>
           )}
-            
-          {/* Input Area: hide during meeting live mode */}
-            {!isLiveMode && highlightChatVisible && (
-              <div className="glass-chat-input-area">
-                <form onSubmit={handleSubmit} className="relative">
-                  <input
-                    ref={inputRef}
-                    value={prompt}
-                    onChange={(e) => setPrompt(e.target.value)}
-                    placeholder="Ask about the screenshot..."
-                    disabled={isStreaming && agentMode !== "chat"}
-                    onFocus={() => {
-                      window.ipcRenderer.send('chat:focus');
-                      if (inputRef.current) {
-                        inputRef.current.style.pointerEvents = 'auto';
-                      }
-                    }}
-                    className="glass-input pr-14 app-region-no-drag"
-                  />
-                  <div className="absolute right-4 top-1/2 -translate-y-1/2">
-                    <div className="flex gap-2 items-center">
-                      {isChatPaneVisible ? (
-                        <div className="flex gap-1 items-center opacity-70">
-                          <span className="text-xs">↵</span>
-                          <span className="text-xs">send</span>
-                          <span className="mx-1">•</span>
-                          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 3a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3H6a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3V6a3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3h12a3 3 0 0 0 3-3 3 3 0 0 0-3-3z"/></svg>
-                          <span className="text-xs">↵</span>
-                          <span className="text-xs">close</span>
-                        </div>
-                      ) : null}
-                    </div>
-                  </div>
-                </form>
-              </div>
-            )}
+
           </div>
         </div>
       </div>

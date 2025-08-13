@@ -93,6 +93,17 @@ html {
   pointer-events: auto;
 }
 
+/* Ensure explicit drag regions work */
+.app-region-drag {
+  -webkit-app-region: drag !important;
+  pointer-events: auto !important;
+  cursor: grab;
+}
+
+.app-region-drag:active {
+  cursor: grabbing;
+}
+
 /* Make all interactive elements clickable */
 button, input, form, [onclick] {
   pointer-events: auto;
@@ -110,29 +121,31 @@ button, input, form, [onclick] {
   -webkit-app-region: no-drag;
 }
 
-/* Clonely-style glass effect */
+/* Clonely-style glass effect - now with liquid glass like mainbar */
 .glass {
-  background-color: rgba(255, 255, 255, 0.8) !important;
-  border: 1px solid rgba(255, 255, 255, 0.3);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0.05) 50%, rgba(255, 255, 255, 0.15) 100%) !important;
+  border: 0.5px solid rgba(255, 255, 255, 0.3) !important;
+  backdrop-filter: blur(20px) saturate(180%) contrast(120%) brightness(110%) hue-rotate(5deg) !important;
+  -webkit-backdrop-filter: blur(20px) saturate(180%) contrast(120%) brightness(110%) hue-rotate(5deg) !important;
+  box-shadow: 0 8px 32px rgba(31, 38, 135, 0.15), 0 4px 16px rgba(255, 255, 255, 0.1) inset, inset 0 2px 0 rgba(255, 255, 255, 0.6), inset 0 -2px 0 rgba(255, 255, 255, 0.2), inset 0 0 20px 10px rgba(255, 255, 255, 0.08) !important;
 }
 
-/* Glass Chat UI - Clearer background for Ask mode */
+/* Glass Chat UI - Liquid glass effect like mainbar */
 .glass-chat-container {
   display: flex;
   flex-direction: column;
   color: #ffffff;
   box-sizing: border-box;
   position: relative;
-  background: rgba(25, 25, 30, 0.35); /* Clearer background for Ask UI */
-  backdrop-filter: blur(8px) saturate(250%) contrast(150%) brightness(115%);
-  -webkit-backdrop-filter: blur(8px) saturate(250%) contrast(150%) brightness(115%);
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0.05) 50%, rgba(255, 255, 255, 0.15) 100%) !important;
+  backdrop-filter: blur(20px) saturate(180%) contrast(120%) brightness(110%) hue-rotate(5deg) !important;
+  -webkit-backdrop-filter: blur(20px) saturate(180%) contrast(120%) brightness(110%) hue-rotate(5deg) !important;
   overflow: hidden;
   border-radius: 12px;
   width: 100%;
   height: 100%;
   max-height: 60vh; /* Limit height to ensure input is visible */
+  box-shadow: 0 8px 32px rgba(31, 38, 135, 0.15), 0 4px 16px rgba(255, 255, 255, 0.1) inset, inset 0 2px 0 rgba(255, 255, 255, 0.6), inset 0 -2px 0 rgba(255, 255, 255, 0.2), inset 0 0 20px 10px rgba(255, 255, 255, 0.08) !important;
   /* Default to non-interactive so clicks pass through */
   pointer-events: none;
 }
@@ -193,46 +206,50 @@ button, input, form, [onclick] {
   margin-bottom: 4px;
   padding: 8px 12px;
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0.05) 50%, rgba(255, 255, 255, 0.1) 100%);
+  border: 0.5px solid rgba(255, 255, 255, 0.2);
+  backdrop-filter: blur(10px) saturate(120%);
+  -webkit-backdrop-filter: blur(10px) saturate(120%);
   color: #ffffff;
   font-size: 13px;
   line-height: 1.5;
 }
 
 .glass-message.user {
-  background: rgba(0, 122, 255, 0.2);
-  border-color: rgba(0, 122, 255, 0.3);
+  background: linear-gradient(135deg, rgba(0, 122, 255, 0.2) 0%, rgba(0, 122, 255, 0.15) 50%, rgba(0, 122, 255, 0.25) 100%);
+  border-color: rgba(0, 122, 255, 0.4);
   margin-left: auto;
   align-self: flex-end;
 }
 
 .glass-message.assistant {
-  background: rgba(255, 255, 255, 0.08);
-  border-color: rgba(255, 255, 255, 0.15);
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0.08) 50%, rgba(255, 255, 255, 0.12) 100%);
+  border-color: rgba(255, 255, 255, 0.25);
   margin-right: auto;
   align-self: flex-start;
 }
 
 .glass-message.error {
-  background: rgba(255, 59, 48, 0.2);
-  border-color: rgba(255, 59, 48, 0.3);
+  background: linear-gradient(135deg, rgba(255, 59, 48, 0.2) 0%, rgba(255, 59, 48, 0.15) 50%, rgba(255, 59, 48, 0.25) 100%);
+  border-color: rgba(255, 59, 48, 0.4);
 }
 
 .glass-message.streaming {
-  background: rgba(52, 199, 89, 0.2);
-  border-color: rgba(52, 199, 89, 0.3);
+  background: linear-gradient(135deg, rgba(52, 199, 89, 0.2) 0%, rgba(52, 199, 89, 0.15) 50%, rgba(52, 199, 89, 0.25) 100%);
+  border-color: rgba(52, 199, 89, 0.4);
 }
 
 .glass-input {
   width: 100%;
-  background: rgba(255, 255, 255, 0.1);
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0.04) 50%, rgba(255, 255, 255, 0.1) 100%);
+  border: 0.5px solid rgba(255, 255, 255, 0.25);
   border-radius: 8px;
   padding: 8px 12px;
-  color: #111111;
+  color: #ffffff;
   font-size: 14px;
   outline: none;
+  backdrop-filter: blur(10px) saturate(150%);
+  -webkit-backdrop-filter: blur(10px) saturate(150%);
   transition: all 0.2s ease;
 }
 
@@ -242,7 +259,7 @@ button, input, form, [onclick] {
 
 .glass-input:focus {
   border-color: rgba(0, 122, 255, 0.5);
-  background: rgba(255, 255, 255, 0.15);
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.12) 0%, rgba(255, 255, 255, 0.08) 50%, rgba(255, 255, 255, 0.15) 100%);
 }
 
 .glass-button {
@@ -348,25 +365,25 @@ button, input, form, [onclick] {
 
 /* --- Liquid Glass Theme: panels, buttons, and animations --- */
 :root {
-  --glass-bg: rgba(0, 0, 0, 0.08);
-  --glass-bg-2: rgba(0, 0, 0, 0.08);
-  --glass-border: transparent;
-  --glass-border-soft: transparent;
+  --glass-bg: linear-gradient(135deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0.05) 50%, rgba(255, 255, 255, 0.15) 100%);
+  --glass-bg-2: linear-gradient(135deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0.05) 50%, rgba(255, 255, 255, 0.15) 100%);
+  --glass-border: rgba(255, 255, 255, 0.3);
+  --glass-border-soft: rgba(255, 255, 255, 0.3);
   --glass-highlight: rgba(255, 255, 255, 0.35);
-  --glass-shadow: none;
-  --glass-blur: 15px;
+  --glass-shadow: 0 8px 32px rgba(31, 38, 135, 0.15), 0 4px 16px rgba(255, 255, 255, 0.1) inset, inset 0 2px 0 rgba(255, 255, 255, 0.6), inset 0 -2px 0 rgba(255, 255, 255, 0.2), inset 0 0 20px 10px rgba(255, 255, 255, 0.08);
+  --glass-blur: 20px;
   --glass-radius: 24px;
   --button-radius: 16px;
   --liquid-ease: cubic-bezier(.20,.80,.20,1);
 }
 
 .liquid-panel {
-  background: var(--glass-bg);
-  border: 1px solid var(--glass-border-soft);
+  background: var(--glass-bg) !important;
+  border: 0.5px solid var(--glass-border-soft) !important;
   border-radius: var(--glass-radius);
-  backdrop-filter: saturate(160%) blur(var(--glass-blur));
-  -webkit-backdrop-filter: saturate(160%) blur(var(--glass-blur));
-  box-shadow: none;
+  backdrop-filter: blur(20px) saturate(180%) contrast(120%) brightness(110%) hue-rotate(5deg) !important;
+  -webkit-backdrop-filter: blur(20px) saturate(180%) contrast(120%) brightness(110%) hue-rotate(5deg) !important;
+  box-shadow: var(--glass-shadow) !important;
   position: relative;
 }
 
@@ -502,73 +519,97 @@ button, input, form, [onclick] {
   to { transform: translateY(-8px) scale(0.97); opacity: 0; }
 }
 
-/* Make existing glass classes slightly darker and clear */
-.glass { background: rgba(255,255,255,0.03) !important; border: 1px solid rgba(255, 255, 255, 0.22); border-radius: var(--glass-radius); box-shadow: none; backdrop-filter: saturate(160%) blur(var(--glass-blur)); -webkit-backdrop-filter: saturate(160%) blur(var(--glass-blur)); }
-/* Main bar - water droplet magnifying effect */
+/* Make existing glass classes use the liquid glass effect */
+.glass { 
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0.05) 50%, rgba(255, 255, 255, 0.15) 100%) !important; 
+  border-radius: var(--glass-radius); 
+  box-shadow: var(--glass-shadow) !important; 
+  backdrop-filter: blur(20px) saturate(180%) contrast(120%) brightness(110%) hue-rotate(5deg) !important; 
+  -webkit-backdrop-filter: blur(20px) saturate(180%) contrast(120%) brightness(110%) hue-rotate(5deg) !important; 
+}
+/* Main bar - liquid glass effect with color refraction */
 .mainbar-glass {
   position: relative;
-  background: rgba(0,0,0,0.04) !important; /* Match lighter panels */
-  border: none;
-  /* Water droplet distortion - reduced blur for magnifying effect */
-  backdrop-filter: blur(8px) saturate(250%) contrast(150%) brightness(115%);
-  -webkit-backdrop-filter: blur(8px) saturate(250%) contrast(150%) brightness(115%);
-  box-shadow: none;
-  transform: scale(1.001); /* Subtle magnification */
-  transform-origin: center;
+  background: linear-gradient(135deg, 
+    rgba(255, 255, 255, 0.1) 0%,
+    rgba(255, 255, 255, 0.05) 50%,
+    rgba(255, 255, 255, 0.15) 100%) !important;
+  /* Enhanced backdrop filter for color bending/refraction */
+  backdrop-filter: blur(20px) saturate(180%) contrast(120%) brightness(110%) hue-rotate(5deg) !important;
+  -webkit-backdrop-filter: blur(20px) saturate(180%) contrast(120%) brightness(110%) hue-rotate(5deg) !important;
+  border-radius: 9999px; /* Keep pill shape for mainbar */
+  border: 0.25px solid rgba(255, 255, 255, 0.3) !important;
+  box-shadow: 
+    0 8px 32px rgba(31, 38, 135, 0.15), /* Blue-ish shadow for depth */
+    0 4px 16px rgba(255, 255, 255, 0.1) inset,
+    inset 0 2px 0 rgba(255, 255, 255, 0.6),
+    inset 0 -2px 0 rgba(255, 255, 255, 0.2),
+    inset 0 0 20px 10px rgba(255, 255, 255, 0.08) !important;
+  overflow: hidden;
+  /* Add chromatic aberration-like effect */
+  transform: translateZ(0);
+  will-change: transform;
 }
-.mainbar-glass::before {
-  content: "";
-  position: absolute;
-  inset: -2px;
-  border-radius: inherit;
-  /* subtle caustic-like highlights to simulate liquid glass distortion */
-  background:
-    radial-gradient(120px 80px at 20% 30%, rgba(255,255,255,0.06), rgba(255,255,255,0) 60%),
-    radial-gradient(140px 120px at 80% 70%, rgba(255,255,255,0.05), rgba(255,255,255,0) 65%);
-  mix-blend-mode: overlay;
-  pointer-events: none;
-  animation: rippleFloatMainbar 7s var(--liquid-ease) infinite alternate;
-}
-@keyframes rippleFloatMainbar { from { transform: translateY(0) translateX(0); } to { transform: translateY(1.5px) translateX(1.5px); } }
+
+/* Removed shimmer animation that was causing glare */
+/* Removed prismatic edge effect that was causing pink outline */
 
 /* Slightly less rounding specifically for the sidebar panel */
 .sidebar-panel { border-radius: 16px !important; }
 
-/* Chat container polish */
-.glass-chat-container { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.14); border-radius: var(--glass-radius); box-shadow: none; backdrop-filter: saturate(140%) blur(18px); -webkit-backdrop-filter: saturate(140%) blur(18px); }
+/* Chat container polish - already defined above with liquid glass effect */
 
 /* Subheader strip for highlight chats */
 .liquid-subheader { background: rgba(255,255,255,0.02); border-bottom: 1px solid rgba(255,255,255,0.14); }
 
-/* Input polish */
-.glass-input { background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.18); color: #ffffff; }
-.glass-input:focus { border-color: rgba(0, 122, 255, 0.55); background: rgba(255, 255, 255, 0.12); }
+/* Input polish - subtle liquid glass */
+.glass-input { 
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0.04) 50%, rgba(255, 255, 255, 0.1) 100%); 
+  border: 0.5px solid rgba(255, 255, 255, 0.25); 
+  color: #ffffff; 
+  backdrop-filter: blur(10px) saturate(150%);
+  -webkit-backdrop-filter: blur(10px) saturate(150%);
+}
+.glass-input:focus { 
+  border-color: rgba(0, 122, 255, 0.55); 
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.12) 0%, rgba(255, 255, 255, 0.08) 50%, rgba(255, 255, 255, 0.15) 100%); 
+}
 
 /* Buttons used in suggestions (if re-enabled) */
 .glass-button { border-radius: var(--button-radius); background: transparent; border: none; box-shadow: none; }
 .glass-button:hover { background: transparent; }
 
-/* Chat bubbles */
-.glass-message { background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.14); color: #ffffff; }
-.glass-message.user { background: rgba(0, 122, 255, 0.18); border-color: rgba(0,122,255,0.28); }
-.glass-message.streaming { background: rgba(52, 199, 89, 0.18); border-color: rgba(52,199,89,0.28); }
-.glass-message.error { background: rgba(255, 59, 48, 0.18); border-color: rgba(255,59,48,0.28); }
-
-/* Global liquid glass: water droplet effect - SAME as mainbar */
-.glass, .glass-chat-container, .liquid-panel { 
-  background: rgba(0,0,0,0.02) !important; /* Even lighter for meeting panels */
-  backdrop-filter: blur(8px) saturate(250%) contrast(150%) brightness(115%);
-  -webkit-backdrop-filter: blur(8px) saturate(250%) contrast(150%) brightness(115%);
-  border: none !important;
-  box-shadow: none !important;
+/* Chat bubbles - subtle liquid glass */
+.glass-message { 
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0.05) 50%, rgba(255, 255, 255, 0.1) 100%); 
+  border: 0.5px solid rgba(255, 255, 255, 0.2); 
+  color: #ffffff; 
+  backdrop-filter: blur(10px) saturate(120%);
+  -webkit-backdrop-filter: blur(10px) saturate(120%);
+}
+.glass-message.user { 
+  background: linear-gradient(135deg, rgba(0, 122, 255, 0.2) 0%, rgba(0, 122, 255, 0.15) 50%, rgba(0, 122, 255, 0.25) 100%); 
+  border-color: rgba(0,122,255,0.4); 
+}
+.glass-message.streaming { 
+  background: linear-gradient(135deg, rgba(52, 199, 89, 0.2) 0%, rgba(52, 199, 89, 0.15) 50%, rgba(52, 199, 89, 0.25) 100%); 
+  border-color: rgba(52,199,89,0.4); 
+}
+.glass-message.error { 
+  background: linear-gradient(135deg, rgba(255, 59, 48, 0.2) 0%, rgba(255, 59, 48, 0.15) 50%, rgba(255, 59, 48, 0.25) 100%); 
+  border-color: rgba(255,59,48,0.4); 
 }
 
-/* Unify backgrounds: match mainbar tone - make meeting panels same as mainbar */
-.glass, .glass-chat-container, .liquid-panel { 
-  background: rgba(0,0,0,0.08) !important; 
-  border: none; 
-  box-shadow: none;
+/* Hide all scrollbars completely */
+.action-chat-panel::-webkit-scrollbar {
+  display: none;
 }
+.action-chat-panel {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+/* All panels now use the same liquid glass effect as mainbar */
 
 /* Center meeting panel by default; ONLY shift when actions are shown */
 .meeting-panels { 

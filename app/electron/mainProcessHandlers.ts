@@ -415,48 +415,50 @@ export function setupMainHandlers({ win }: { win: InstanceType<typeof BrowserWin
       if (action?.type === 'say-next') {
         // Better prompt for more specific suggestions using Gemini 2.5 Flash
         try {
+          console.log('[MeetingChat] Processing say-next action...');
           const geminiKey = process.env.GEMINI_API_KEY;
+          console.log('[MeetingChat] GEMINI_API_KEY present:', !!geminiKey);
+          
           if (geminiKey) {
+            console.log('[MeetingChat] Using Gemini 2.5 Flash for say-next...');
             const { GoogleGenerativeAI } = await import("@google/generative-ai");
             const genAI = new GoogleGenerativeAI(geminiKey);
             const model = genAI.getGenerativeModel({ 
               model: "gemini-2.5-flash",
               generationConfig: {
                 temperature: 0.5,
-                maxOutputTokens: 150, // Slightly longer for better suggestions
+                maxOutputTokens: 120, // 3-4 sentences
               }
             });
             
             const prompt = `You suggest exactly what someone should say next in a meeting. 
 
-Your response should be:
-- A complete sentence or question they can actually say
-- Specific and directly related to the last few exchanges
-- Move the conversation forward productively
-- Natural conversational language, not formal or robotic
-- ONE single response, not multiple options
-
-Examples of good responses:
-- "Could you clarify what the timeline looks like for the design phase?"
-- "I think we should prioritize the API integration first since that's blocking the frontend team."
-- "That makes sense. What resources do we need to make that happen?"
-- "Let me summarize what I heard: we're moving forward with option B, targeting mid-January. Is that correct?"
+Provide 3-4 sentences that the person can actually say.
+Be specific and directly related to the last few exchanges.
+Use natural conversational language.
+Move the conversation forward productively.
 
 Do NOT say things like "Consider asking..." or "You might want to..." - just provide the actual words to say.
 
 ${seed}`;
             
+            console.log('[MeetingChat] Sending request to Gemini...');
             const result = await model.generateContent(prompt);
+            console.log('[MeetingChat] Got Gemini response');
             const text = result.response.text()?.trim() || 'Could you elaborate on that last point?';
+            console.log('[MeetingChat] Sending text to frontend:', text.substring(0, 50) + '...');
             send('text', text);
             send('stream_end');
+            console.log('[MeetingChat] Say-next complete');
           } else {
+            console.log('[MeetingChat] No GEMINI_API_KEY, using fallback response');
             // Fallback deterministic text
             send('text', 'What are the next steps we need to take to move this forward?');
             send('stream_end');
           }
         } catch (err) {
-          console.warn('[MeetingChat] say-next failed:', err);
+          console.error('[MeetingChat] say-next failed:', err);
+          console.error('[MeetingChat] Error details:', err instanceof Error ? err.message : String(err));
           send('text', 'Ask for clarification on the last point and propose a next step.');
           send('stream_end');
         }
@@ -477,27 +479,28 @@ ${seed}`;
               model: "gemini-2.5-flash",
               generationConfig: {
                 temperature: 0.3,
-                maxOutputTokens: 1500, // Much longer responses
+                maxOutputTokens: 150, // 3-4 sentences
               }
             });
             
             const prompt = `You are a helpful assistant performing a web search for the user. 
-Provide informative, comprehensive answers as if you just searched the web.
-Be thorough and detailed. Format your response in a clear, easy-to-read way.
-If the query is about recent events or specific locations, acknowledge that you're providing general information.
+Write exactly 3-4 clear, informative sentences answering the query.
+Be direct and include the most important facts.
 
 Web search query: "${searchQuery}"
 
-Provide a helpful, detailed response based on this search query.`;
+Provide a concise response in 3-4 sentences.`;
             
             // Generate response
+            console.log('[MeetingChat] Calling Gemini with prompt:', prompt);
             const result = await model.generateContent(prompt);
             const fullResponse = result.response.text();
+            console.log('[MeetingChat] Got Gemini response:', fullResponse.substring(0, 100) + '...');
             
             // Stream the response in chunks for better UX
             const chunkSize = 50; // Characters per chunk
             for (let i = 0; i < fullResponse.length; i += chunkSize) {
-              const chunk = fullResponse.slice(0, i + chunkSize);
+              const chunk = fullResponse.slice(i, i + chunkSize);
               send('text', chunk);
               await new Promise(resolve => setTimeout(resolve, 20)); // Small delay for streaming effect
             }
@@ -517,11 +520,61 @@ Provide a helpful, detailed response based on this search query.`;
         return;
       }
       
-      // For other generic actions
+      // For other generic actions - use Gemini Flash
       if (action?.query || action?.text) {
         const q = action.query || action.text;
-        send('text', `Processing: ${q}`);
-        send('stream_end');
+        console.log('[MeetingChat] Processing generic action:', q);
+        
+        try {
+          const geminiKey = process.env.GEMINI_API_KEY;
+          if (geminiKey) {
+            const { GoogleGenerativeAI } = await import("@google/generative-ai");
+            const genAI = new GoogleGenerativeAI(geminiKey);
+            const model = genAI.getGenerativeModel({ 
+              model: "gemini-2.5-flash",
+              generationConfig: {
+                temperature: 0.7,
+                maxOutputTokens: 150, // 3-4 sentences
+              }
+            });
+            
+            // Create a helpful prompt based on the action
+            const prompt = `Provide a brief, helpful response about: "${q}"
+
+Write exactly 3-4 clear, informative sentences.
+Focus on the most important and actionable information.
+Be direct and concise. No bullet points, just flowing sentences.`;
+            
+            // Generate response
+            const result = await model.generateContent(prompt);
+            const fullResponse = result.response.text();
+            
+            // Stream the response with typing effect
+            const words = fullResponse.split(' ');
+            
+            for (let i = 0; i < words.length; i++) {
+              const wordToSend = (i > 0 ? ' ' : '') + words[i];
+              send('text', wordToSend);
+              
+              // Small delay for typing effect (faster than character by character)
+              if (i < words.length - 1) {
+                await new Promise(resolve => setTimeout(resolve, 30));
+              }
+            }
+            
+            send('stream_end');
+            console.log('[MeetingChat] Generic action response completed');
+          } else {
+            // Fallback if no Gemini key
+            send('text', 'Please configure GEMINI_API_KEY to enable AI responses.');
+            send('stream_end');
+          }
+        } catch (err) {
+          console.error('[MeetingChat] Generic action failed:', err);
+          // Make sure to show error to user
+          send('text', `I encountered an error processing your request about "${q}". Please try again.`);
+          send('stream_end');
+        }
         return;
       }
     } catch (e) {

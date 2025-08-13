@@ -27,6 +27,7 @@ interface GlassMeetingViewProps {
 }
 
 export const GlassMeetingView: React.FC<GlassMeetingViewProps> = ({ onActionClick }) => {
+  void onActionClick;
   const [conversationHistory, setConversationHistory] = useState<ConversationTurn[]>([]);
   const [currentAnalysis, setCurrentAnalysis] = useState<AnalysisResult | null>(null);
   const [isListening, setIsListening] = useState(false);
