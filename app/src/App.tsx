@@ -1076,11 +1076,16 @@ function App() {
               onClick={(e) => {
                 e.stopPropagation();
                 e.preventDefault();
+                console.log('[Menu Button] Clicked! Current state:', isMenuOpen);
                 setIsMenuOpen(!isMenuOpen);
               }}
-              onMouseEnter={() => setIsMenuOpen(true)}
-              className="liquid-button inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md text-sm font-medium h-8 px-3"
+              onMouseEnter={() => {
+                console.log('[Menu Button] Mouse entered');
+                setIsMenuOpen(true);
+              }}
+              className="liquid-button inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md text-sm font-medium h-8 px-3 app-region-no-drag pointer-events-auto relative z-50"
               title="Menu"
+              style={{ pointerEvents: 'auto' }}
             >
               <svg width="14" height="18" viewBox="0 0 4 18" fill="none" xmlns="http://www.w3.org/2000/svg">
                  <circle cx="2" cy="2" r="1" fill="currentColor"/>

@@ -448,6 +448,10 @@ button, input, form, [onclick] {
   box-shadow: none;
   position: relative;
   overflow: hidden;
+  pointer-events: auto !important;
+  cursor: pointer !important;
+  -webkit-app-region: no-drag !important;
+  app-region: no-drag !important;
 }
 .liquid-button:hover { opacity: 0.95; }
 .liquid-button:active { box-shadow: none; }
