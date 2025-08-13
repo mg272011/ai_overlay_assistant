@@ -1110,14 +1110,16 @@ function App() {
             {/* Debug: Menu state = {isMenuOpen ? 'OPEN' : 'CLOSED'} */}
             {isMenuOpen && (
               <div 
-                className="fixed right-4 top-20 w-28 rounded-md shadow-xl pointer-events-auto"
+                className="absolute right-0 top-[calc(100%+8px)] w-28 rounded-md glass liquid-panel shadow-xl pointer-events-auto"
                 style={{ 
-                  position: 'fixed',
+                  position: 'absolute',
                   pointerEvents: 'auto',
                   zIndex: 999999,
-                  backgroundColor: 'rgba(20, 20, 40, 0.98)',
-                  border: '2px solid rgba(100, 100, 255, 0.5)',
-                  backdropFilter: 'blur(10px)'
+                  background: 'linear-gradient(135deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0.05) 50%, rgba(255, 255, 255, 0.15) 100%)',
+                  border: '0.5px solid rgba(255, 255, 255, 0.3)',
+                  backdropFilter: 'blur(20px) saturate(180%) contrast(120%) brightness(110%) hue-rotate(5deg)',
+                  WebkitBackdropFilter: 'blur(20px) saturate(180%) contrast(120%) brightness(110%) hue-rotate(5deg)',
+                  boxShadow: '0 8px 32px rgba(31, 38, 135, 0.15), 0 4px 16px rgba(255, 255, 255, 0.1) inset'
                 }}
               >
                 {/* Hide option */}
@@ -1130,7 +1132,7 @@ function App() {
                     window.ipcRenderer.send("minimize-window");
                     setIsMenuOpen(false);
                   }}
-                  className="w-full text-left px-2 py-1.5 text-xs text-white/90 flex items-center gap-1 transition-colors"
+                  className="w-full text-left px-3 py-2 text-xs text-white/90 flex items-center gap-2 transition-all hover:bg-white/10 rounded-md"
                   title="Hide (⌘+⌫)"
                 >
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -1148,7 +1150,7 @@ function App() {
                     window.close();
                     setIsMenuOpen(false);
                   }}
-                  className="w-full text-left px-2 py-1.5 text-xs text-white/90 flex items-center gap-1 transition-colors"
+                  className="w-full text-left px-3 py-2 text-xs text-white/90 flex items-center gap-2 transition-all hover:bg-white/10 rounded-md"
                   title="Quit App"
                 >
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

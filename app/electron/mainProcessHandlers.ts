@@ -310,8 +310,39 @@ export function setupMainHandlers({ win }: { win: InstanceType<typeof BrowserWin
     try {
       // Convert to base64 and send to Glass JavaScript STT
       if (glassJSListenService && glassJSListenService.isSessionActive()) {
-        const base64Data = Buffer.from(chunk).toString('base64');
-        await glassJSListenService.sendMicAudioContent(base64Data);
+        const buffer = Buffer.from(chunk);
+        
+        // The audio is interleaved stereo PCM16 at 16kHz
+        // Channel 0 (left) = Microphone (user speaking)
+        // Channel 1 (right) = System audio (other person speaking)
+        
+        // Extract left channel (mic) and right channel (system)
+        const samples = buffer.length / 2; // 16-bit = 2 bytes per sample
+        const leftChannel = Buffer.alloc(buffer.length / 2);
+        const rightChannel = Buffer.alloc(buffer.length / 2);
+        
+        let leftIndex = 0;
+        let rightIndex = 0;
+        
+        for (let i = 0; i < buffer.length; i += 4) { // 4 bytes = 1 stereo sample (2 bytes left, 2 bytes right)
+          // Left channel (mic)
+          leftChannel[leftIndex++] = buffer[i];
+          leftChannel[leftIndex++] = buffer[i + 1];
+          
+          // Right channel (system)
+          rightChannel[rightIndex++] = buffer[i + 2];
+          rightChannel[rightIndex++] = buffer[i + 3];
+        }
+        
+        // Send left channel to mic STT (Me)
+        const micBase64 = leftChannel.toString('base64');
+        await glassJSListenService.sendMicAudioContent(micBase64);
+        
+        // Send right channel to system STT (Them)
+        const systemBase64 = rightChannel.toString('base64');
+        await glassJSListenService.sendSystemAudioContent(systemBase64);
+        
+        console.log('[MainHandlers] 🎤 Sent left channel to Mic STT, right channel to System STT');
       }
     } catch (error) {
       console.error('[MainHandlers] Error processing live audio chunk:', error);
