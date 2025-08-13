@@ -185,36 +185,48 @@ export class VirtualCursorWindow {
       Math.pow(targetX - startX, 2) + Math.pow(targetY - startY, 2)
     );
     
-    // Duration based on distance (min 0.2s, max 0.8s)
-    const durationSeconds = Math.min(0.8, Math.max(0.2, distance / 1000));
+    // Duration based on distance (min 200ms, max 1000ms)
+    const duration = Math.min(1000, Math.max(200, distance * 1.5));
+    const steps = Math.max(Math.floor(duration / 16), 10); // ~60fps
     
-    console.log(`[VirtualCursorWindow] Animation: distance=${distance}, duration=${durationSeconds}s`);
+    console.log(`[VirtualCursorWindow] Animation: distance=${distance}, duration=${duration}, steps=${steps}`);
     
     try {
-      // Use the new Swift smooth movement tool for accurate, smooth cursor movement
-      const swiftScriptPath = path.join(app.getAppPath(), "swift", "smoothMove.swift");
-      
-      // Update visual cursor position immediately
-      this.currentPosition = targetPosition;
-      
-      // Execute smooth movement with Swift (handles coordinate scaling internally)
-      const { stdout, stderr } = await execPromise(
-        `swift ${swiftScriptPath} ${targetX} ${targetY} ${durationSeconds} easeInOut`
-      );
-      
-      if (stdout) {
-        try {
-          const result = JSON.parse(stdout.trim());
-          console.log(`[VirtualCursorWindow] Smooth move result:`, result);
-        } catch (e) {
-          console.log(`[VirtualCursorWindow] Swift output:`, stdout.trim());
+      // Animate the visual cursor only - don't move the real mouse
+      for (let i = 0; i <= steps; i++) {
+        if (!this.window || this.window.isDestroyed()) {
+          console.log('[VirtualCursorWindow] Window destroyed during animation, stopping');
+          return;
+        }
+        
+        const progress = i / steps;
+        // Use easing function for natural movement
+        const easedProgress = this.easeInOutCubic(progress);
+        
+        const currentX = startX + (targetX - startX) * easedProgress;
+        const currentY = startY + (targetY - startY) * easedProgress;
+        
+        this.currentPosition = {
+          x: Math.round(currentX),
+          y: Math.round(currentY),
+          isDragging: targetPosition.isDragging
+        };
+        
+        // Update visual position
+        if (this.window && !this.window.isDestroyed()) {
+          this.window.webContents.send("update-cursor-position", this.currentPosition);
+        }
+        
+        // Wait for next frame
+        if (i < steps) {
+          await new Promise(resolve => setTimeout(resolve, 16));
         }
       }
-      if (stderr) {
-        console.error(`[VirtualCursorWindow] Smooth move stderr:`, stderr.trim());
-      }
       
-      // Update the visual cursor to match
+      // Ensure we end at exact target position
+      this.currentPosition = targetPosition;
+      console.log(`[VirtualCursorWindow] Final position: (${this.currentPosition.x}, ${this.currentPosition.y})`);
+      
       if (this.window && !this.window.isDestroyed()) {
         this.window.webContents.send("update-cursor-position", this.currentPosition);
         
@@ -222,8 +234,6 @@ export class VirtualCursorWindow {
         this.window.setAlwaysOnTop(true, 'screen-saver');
         this.window.focus();
       }
-      
-      console.log(`[VirtualCursorWindow] Final position: (${this.currentPosition.x}, ${this.currentPosition.y})`);
     } catch (error) {
       console.error('[VirtualCursorWindow] Error in smoothMoveTo animation:', error);
       
@@ -242,16 +252,17 @@ export class VirtualCursorWindow {
   async performClick(position: CursorPosition): Promise<void> {
     if (!this.window) return;
 
-    console.log(`[VirtualCursorWindow] performClick called at (${position.x}, ${position.y})`);
+    console.log(`[VirtualCursorWindow] performClick called at (${position.x}, ${position.y}) - VISUAL ONLY`);
     
     // Ensure cursor is visible above everything (especially Spotlight)
     this.bringToFront();
 
-    // Show click animation
+    // Show click animation (visual only)
     this.window.webContents.send("show-click-animation", position);
 
-    // Always use Swift-based click to avoid external binary dependency
-    await this.performClickWithSwift(position);
+    // DO NOT perform actual click - the virtual cursor is only for visual feedback
+    // The actual clicking is handled by the AgentVisionService using Swift tools
+    console.log(`[VirtualCursorWindow] Visual click animation shown, no actual click performed`);
   }
 
   // Visual click animation only (no actual clicking)

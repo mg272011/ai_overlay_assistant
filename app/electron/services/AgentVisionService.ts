@@ -80,20 +80,37 @@ export class AgentVisionService {
   ): Promise<ActionResult> {
     const cursor = getVirtualCursor();
     
-    // Move cursor smoothly to target
+    // Move virtual cursor smoothly to target (visual only)
     await cursor.moveCursor({ x, y });
     await new Promise(resolve => setTimeout(resolve, 200));
     
-    // Perform click
+    // Show click animation (visual only)
     await cursor.performClick({ x, y });
+    
+    // Perform the ACTUAL click using Swift
+    try {
+      const swiftScriptPath = path.join(app.getAppPath(), 'swift', 'clickAtCoordinates.swift');
+      const { stdout, stderr } = await execPromise(`swift ${swiftScriptPath} ${x} ${y}`);
+      
+      if (stdout) {
+        console.log('[AgentVision] Swift click output:', stdout.trim());
+      }
+      if (stderr) {
+        console.error('[AgentVision] Swift click error:', stderr);
+      }
+    } catch (error) {
+      console.error('[AgentVision] Failed to perform Swift click:', error);
+      return {
+        success: false,
+        message: `Failed to click at (${x}, ${y}): ${error}`,
+        coordinates: { x, y }
+      };
+    }
+    
     await new Promise(resolve => setTimeout(resolve, this.screenshotDelay));
     
     // Take screenshot to verify
     const verifyScreenshot = await this.takeScreenshot();
-    
-    // Quick verification - did something change?
-    // In a full implementation, we'd compare before/after screenshots
-    // or check if expected UI appeared
     
     return {
       success: true,
