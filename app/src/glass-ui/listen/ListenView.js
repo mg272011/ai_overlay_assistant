@@ -281,12 +281,14 @@ export class ListenView extends LitElement {
 
   // ✅ HANDLE MEETING ACTION CLICKS - THE MISSING PIECE!
   handleMeetingActionClicked(event) {
-    console.log('[ListenView] 🔍 Meeting action clicked:', event.detail);
+    console.log('[ListenView] 🔍 ===== MEETING ACTION CLICKED =====');
+    console.log('[ListenView] 🔍 Event detail:', JSON.stringify(event.detail, null, 2));
     
     const { type, text, query, actionType } = event.detail;
     
     // Generate unique chat ID for this action
     const chatId = `meeting-chat-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    console.log('[ListenView] 🔍 Generated chat ID:', chatId);
     
     // Determine action type and prepare action object
     let action;
@@ -310,14 +312,27 @@ export class ListenView extends LitElement {
       };
     }
     
-    console.log('[ListenView] 🚀 Starting meeting chat with action:', action);
+    console.log('[ListenView] 🚀 Final action object:', JSON.stringify(action, null, 2));
+    console.log('[ListenView] 🚀 About to send IPC...');
+    console.log('[ListenView] 🚀 electronAPI available?', !!window.electronAPI);
+    console.log('[ListenView] 🚀 electronAPI.send available?', !!window.electronAPI?.send);
     
     // Send IPC message to start meeting chat
     if (window.electronAPI?.send) {
-      window.electronAPI.send('start-meeting-chat', { chatId, action });
-      console.log('[ListenView] ✅ Sent start-meeting-chat IPC message');
+      try {
+        window.electronAPI.send('start-meeting-chat', { chatId, action });
+        console.log('[ListenView] ✅ ✅ ✅ Successfully sent start-meeting-chat IPC message');
+        console.log('[ListenView] ✅ Payload sent:', JSON.stringify({ chatId, action }, null, 2));
+        
+        // Set up listener for the response
+        this.setupMeetingChatListener(chatId);
+        
+      } catch (error) {
+        console.error('[ListenView] ❌ Error sending IPC:', error);
+      }
     } else {
       console.error('[ListenView] ❌ electronAPI.send not available');
+      console.error('[ListenView] ❌ electronAPI object:', window.electronAPI);
     }
   }
 
