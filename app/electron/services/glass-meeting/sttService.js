@@ -143,7 +143,7 @@ class GlassSttService {
                 if (isFinal) {
                     transcript = await this.correctIfObvious(transcript);
                 }
-                console.log(`[Glass-Meeting] 🔊 Them: ${transcript} (${isFinal ? 'final' : 'partial'})`);
+                console.log(`[Glass-Meeting] 🔊 Them (FROM SYSTEM AUDIO): ${transcript} (${isFinal ? 'final' : 'partial'})`);
                 this.sendToRenderer('stt-update', {
                     speaker: 'Them', 
                     text: transcript,
@@ -231,7 +231,7 @@ class GlassSttService {
             if (!this.micAudioCounter) this.micAudioCounter = 0;
             this.micAudioCounter++;
             if (this.micAudioCounter % 10 === 0) {
-                console.log('[Glass-Meeting] Sent mic audio chunk #', this.micAudioCounter);
+                console.log('[Glass-Meeting] 🎤 MIC AUDIO chunk #', this.micAudioCounter, '-> MY STT session (should be labeled as "Me")');
             }
         } catch (error) {
             console.error('[Glass-Meeting] Error sending mic audio:', error);
@@ -249,7 +249,7 @@ class GlassSttService {
             if (!this.systemAudioCounter) this.systemAudioCounter = 0;
             this.systemAudioCounter++;
             if (this.systemAudioCounter % 10 === 0) {
-                console.log('[Glass-Meeting] Sent system audio chunk #', this.systemAudioCounter);
+                console.log('[Glass-Meeting] 🔊 SYSTEM AUDIO chunk #', this.systemAudioCounter, '-> THEIR STT session (should be labeled as "Them")');
             }
         } catch (error) {
             console.error('[Glass-Meeting] Error sending system audio:', error);
