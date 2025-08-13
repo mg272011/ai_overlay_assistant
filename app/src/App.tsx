@@ -1063,7 +1063,11 @@ function App() {
           {/* 3-dots menu */}
           <div
             className="relative app-region-no-drag pointer-events-auto"
-            style={{ pointerEvents: 'auto', zIndex: 100 }}
+            style={{ 
+              pointerEvents: 'auto', 
+              zIndex: 100,
+              overflow: 'visible'
+            }}
             onMouseEnter={() => {
               console.log('[Menu Container] Mouse entered');
               if (menuCloseTimerRef.current) {
@@ -1102,7 +1106,7 @@ function App() {
                </svg>
             </button>
 
-            {/* Dropdown menu - DEBUG: isMenuOpen = {String(isMenuOpen)} */}
+            {/* Dropdown menu */}
             {isMenuOpen === true && (
               <div 
                 className="absolute right-0 top-[calc(100%+12px)] w-28 rounded-md z-[9999] glass liquid-panel shadow-xl pointer-events-auto"
