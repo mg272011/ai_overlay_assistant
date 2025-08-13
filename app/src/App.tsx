@@ -1103,8 +1103,8 @@ function App() {
             </button>
 
             {/* Dropdown menu */}
-            {console.log('[Menu Dropdown] isMenuOpen:', isMenuOpen) && false}
-            {isMenuOpen && (
+            {isMenuOpen ? (
+              console.log('[Menu Dropdown] Rendering dropdown menu'),
               <div 
                 className="absolute right-0 top-[calc(100%+12px)] w-28 rounded-md z-[9999] glass liquid-panel shadow-xl pointer-events-auto"
                 style={{ 
@@ -1153,7 +1153,7 @@ function App() {
                   <span>Quit</span>
                 </button>
               </div>
-            )}
+            ) : null}
           </div>
         </div>
       </div>
