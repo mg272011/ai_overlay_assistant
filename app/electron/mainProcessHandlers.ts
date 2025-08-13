@@ -1947,11 +1947,11 @@ async function performVisualNavigation(appName: string, cursor: ReturnType<typeo
     const screenshot = await takeAndSaveScreenshots("Desktop", timestampFolder);
     
     if (screenshot) {
-      // Rapid JSON response for input bar coordinates - be VERY specific to avoid clicking agent's own input
-      const inputResult = await visionService.analyzeScreenForElement(
-        screenshot,
-        "Find the macOS Spotlight search input field - the white text input box at the top center of the screen that says 'Search' or 'Spotlight Search'. This is NOT the agent's chat input, but the system Spotlight search box where you type to find applications. Return coordinates for the beginning/left side of this input field."
-      );
+              // Rapid JSON response for input bar coordinates - find the "S" in "Spotlight Search"
+        const inputResult = await visionService.analyzeScreenForElement(
+          screenshot,
+          "Find the text 'Spotlight Search' in the macOS Spotlight overlay at the top center of the screen. Return coordinates for the letter 'S' at the very beginning of 'Spotlight Search' - this is where the input field starts and where typing begins."
+        );
       
       if (inputResult.found && inputResult.x && inputResult.y) {
         console.log(`[VisualNav] 👁️ Vision found Spotlight input at (${inputResult.x}, ${inputResult.y})`);
