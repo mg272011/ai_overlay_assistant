@@ -1974,27 +1974,27 @@ async function performVisualNavigation(appName: string, cursor: ReturnType<typeo
           await new Promise(resolve => setTimeout(resolve, 300));
         }
         
-        // Now find and click the input field
-              const inputResult = await visionService.analyzeScreenForElement(
-        screenshot,
-        "Spotlight search input text field - the white rectangular search box at the top center of the screen where you type"
-      );
+                // Now find and click the input field (avoid preview icons!)
+        const inputResult = await visionService.analyzeScreenForElement(
+          screenshot,
+          "Spotlight search text input field only - the empty white rectangular text box at the very top of Spotlight where you type, NOT any app icons or preview suggestions below it"
+        );
       
       if (inputResult.found && inputResult.x && inputResult.y) {
         console.log(`[VisualNav] 👁️ Vision found input field at (${inputResult.x}, ${inputResult.y})`);
         await cursor.moveCursor({ x: inputResult.x, y: inputResult.y });
         await new Promise(resolve => setTimeout(resolve, 300));
         await cursor.performClick({ x: inputResult.x, y: inputResult.y });
-      } else {
-        // Improved fallback position - exactly in the center of typical Spotlight input
-        console.log(`[VisualNav] Vision failed, using improved fallback position`);
-        const inputX = Math.floor(display.bounds.width / 2); // Center horizontally
-        const inputY = Math.floor(display.bounds.height * 0.18); // Higher up, typical Spotlight position
-        console.log(`[VisualNav] Clicking fallback input position at (${inputX}, ${inputY})`);
-        await cursor.moveCursor({ x: inputX, y: inputY });
-        await new Promise(resolve => setTimeout(resolve, 300));
-        await cursor.performClick({ x: inputX, y: inputY });
-      }
+              } else {
+          // Improved fallback position - exactly in the center of typical Spotlight input field (NOT preview icons)
+          console.log(`[VisualNav] Vision failed, using improved fallback position for TEXT INPUT FIELD`);
+          const inputX = Math.floor(display.bounds.width / 2); // Center horizontally
+          const inputY = Math.floor(display.bounds.height * 0.15); // Higher up, avoiding preview area
+          console.log(`[VisualNav] Clicking fallback TEXT INPUT position at (${inputX}, ${inputY}) - avoiding preview icons`);
+          await cursor.moveCursor({ x: inputX, y: inputY });
+          await new Promise(resolve => setTimeout(resolve, 300));
+          await cursor.performClick({ x: inputX, y: inputY });
+        }
       }
       
       // Step 5: Wait a second, then type the app name
@@ -2012,7 +2012,7 @@ async function performVisualNavigation(appName: string, cursor: ReturnType<typeo
       if (screenshot2) {
               const appResult = await visionService.analyzeScreenForElement(
         screenshot2,
-        `${appName} application icon or result item in the Spotlight search results list - look for the app name and icon`
+        `${appName} application in the search results list below the text input - look for the specific app name "${appName}" with its icon in the results, NOT in any preview area`
       );
       
       if (appResult.found && appResult.x && appResult.y) {
@@ -2020,16 +2020,16 @@ async function performVisualNavigation(appName: string, cursor: ReturnType<typeo
         await cursor.moveCursor({ x: appResult.x, y: appResult.y });
         await new Promise(resolve => setTimeout(resolve, 300));
         await cursor.performClick({ x: appResult.x, y: appResult.y });
-      } else {
-        // Improved fallback to first result position
-        console.log(`[VisualNav] Vision failed, clicking improved first result position`);
-        const resultX = Math.floor(display.bounds.width / 2); // Center horizontally
-        const resultY = Math.floor(display.bounds.height * 0.28); // Better positioned for first result
-        console.log(`[VisualNav] Clicking fallback result position at (${resultX}, ${resultY})`);
-        await cursor.moveCursor({ x: resultX, y: resultY });
-        await new Promise(resolve => setTimeout(resolve, 300));
-        await cursor.performClick({ x: resultX, y: resultY });
-      }
+              } else {
+          // Improved fallback to first search result position (below text input, not preview area)
+          console.log(`[VisualNav] Vision failed, clicking improved first SEARCH RESULT position`);
+          const resultX = Math.floor(display.bounds.width / 2); // Center horizontally
+          const resultY = Math.floor(display.bounds.height * 0.25); // In actual search results area
+          console.log(`[VisualNav] Clicking fallback SEARCH RESULT position at (${resultX}, ${resultY}) - avoiding preview icons`);
+          await cursor.moveCursor({ x: resultX, y: resultY });
+          await new Promise(resolve => setTimeout(resolve, 300));
+          await cursor.performClick({ x: resultX, y: resultY });
+        }
       }
     } catch (screenshotError) {
       console.error(`[VisualNav] Screenshot failed:`, screenshotError);
