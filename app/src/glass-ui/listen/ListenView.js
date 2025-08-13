@@ -336,6 +336,54 @@ export class ListenView extends LitElement {
     }
   }
 
+  // Set up listener for meeting chat responses
+  setupMeetingChatListener(chatId) {
+    console.log('[ListenView] 🎧 Setting up meeting chat listener for chatId:', chatId);
+    
+    if (!window.electronAPI?.on) {
+      console.error('[ListenView] ❌ electronAPI.on not available for listening');
+      return;
+    }
+    
+    // Listen for meeting chat stream events
+    const handleMeetingChatStream = (data) => {
+      console.log('[ListenView] 🎧 ===== RECEIVED MEETING CHAT STREAM =====');
+      console.log('[ListenView] 🎧 Data received:', JSON.stringify(data, null, 2));
+      console.log('[ListenView] 🎧 Expected chatId:', chatId);
+      console.log('[ListenView] 🎧 Received chatId:', data.chatId);
+      console.log('[ListenView] 🎧 ChatId match:', data.chatId === chatId);
+      console.log('[ListenView] 🎧 Event type:', data.type);
+      console.log('[ListenView] 🎧 Content:', data.content);
+      
+      if (data.chatId === chatId) {
+        console.log('[ListenView] 🎧 ✅ Chat ID matches, processing...');
+        
+        if (data.type === 'text') {
+          console.log('[ListenView] 🎧 📝 Received text chunk:', data.content);
+          // Show the response in the UI (you can customize this)
+          this.showMeetingResponse(data.content);
+        } else if (data.type === 'stream_end') {
+          console.log('[ListenView] 🎧 🏁 Stream ended');
+          // Clean up the listener
+          window.electronAPI.removeListener('meeting-chat-stream', handleMeetingChatStream);
+        }
+      } else {
+        console.log('[ListenView] 🎧 ⚠️ Chat ID mismatch, ignoring');
+      }
+    };
+    
+    // Add the listener
+    window.electronAPI.on('meeting-chat-stream', handleMeetingChatStream);
+    console.log('[ListenView] 🎧 ✅ Meeting chat listener set up successfully');
+  }
+  
+  // Show meeting response in UI
+  showMeetingResponse(content) {
+    console.log('[ListenView] 📱 Showing meeting response:', content);
+    // For now, just log it - you can integrate with your UI components
+    // This could update a response area, show a notification, etc.
+  }
+
   updated(changedProps) { super.updated(changedProps); if (changedProps.has('viewMode')) this.adjustWindowHeight(); }
   handleSttMessagesUpdated() { this.adjustWindowHeightThrottled(); }
   firstUpdated() { super.firstUpdated(); setTimeout(() => this.adjustWindowHeight(), 200); }
