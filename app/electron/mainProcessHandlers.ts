@@ -629,7 +629,7 @@ Provide a helpful response with key information about the topic.`;
               model: "gemini-2.5-flash",
               generationConfig: {
                 temperature: 0.7,
-                maxOutputTokens: 150, // 3-4 sentences
+                maxOutputTokens: 400, // Enough for a complete response
               }
             });
             
