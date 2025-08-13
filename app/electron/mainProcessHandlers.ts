@@ -2021,10 +2021,10 @@ async function performVisualNavigation(appName: string, cursor: ReturnType<typeo
     const screenshot = await takeAndSaveScreenshots("Desktop", timestampFolder);
     
     if (screenshot) {
-              // Rapid JSON response for input bar coordinates - find the "S" in "Spotlight Search"
+              // More accurate prompt for finding the input field
         const inputResult = await visionService.analyzeScreenForElement(
           screenshot,
-          "Find the text 'Spotlight Search' in the macOS Spotlight overlay at the top center of the screen. Return coordinates for the letter 'S' at the very beginning of 'Spotlight Search' - this is where the input field starts and where typing begins."
+          "Find the Spotlight search window - it's a floating search bar with rounded corners, usually centered horizontally and in the upper third of the screen. Look for the text input field area (not icons or labels). The input field is the white/light area where text can be typed, usually with placeholder text. Return the coordinates of the CENTER of this text input area where a cursor would appear when clicked. Return JSON: {\"found\": true/false, \"x\": <center x of input field>, \"y\": <center y of input field>}"
         );
       
       if (inputResult.found && inputResult.x && inputResult.y) {

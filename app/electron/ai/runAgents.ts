@@ -110,20 +110,20 @@ export async function* runActionAgentStreaming(
 ${isAgentMode ? `
 ## COLLABORATIVE MODE ACTIVE - VISUAL INTERACTION PRIORITY
 YOU ARE IN COLLABORATIVE MODE. The user can see your cursor movements. 
-CRITICAL: PREFER VISUAL INTERACTIONS OVER INVISIBLE COMMANDS:
-1. **To open apps: USE CLICK** if the app icon is in the clickable elements list
-2. **If no clickable elements or app not in list: USE APPLESCRIPT** to open the app
-3. **To interact with UI: USE CLICK** - Click on buttons and UI elements when available
-4. **Show the user WHERE things are** - Your cursor movements are visible, use them to demonstrate
-5. **IMPORTANT**: If you receive 0 clickable elements, immediately use Applescript to complete the task
+CRITICAL: USE VISUAL INTERACTIONS AND SMART COMMANDS:
+1. **To open apps: USE =OpenApp** - Smart app opening with multiple strategies
+2. **To find and click text/buttons: USE =FindAndClickText** - Vision-based clicking
+3. **To type text: USE =TypeText** - Direct keyboard input without AppleScript
+4. **To interact with UI: USE CLICK** - Click on buttons and UI elements when available
+5. **Show the user WHERE things are** - Your cursor movements are visible and smooth
 
-Example: If asked to "Open Chrome" and you have 0 clickable elements:
-- DO: Use =Applescript with 'tell application "Google Chrome" to activate'
-- DON'T: Keep describing the screen or saying you can't find elements
+Example: If asked to "Open Chrome":
+- DO: Use =OpenApp with 'Google Chrome'
+- DON'T: Use =Applescript (it's blocked in collaborative mode)
 
-Example: If asked to "Open Chrome" and Chrome IS in the clickable elements list:
-- DO: Use =Click to click on Chrome icon (element ID)
-- DON'T: Use =Applescript when you can click visually
+Example: If asked to "Click on the File menu":
+- DO: Use =FindAndClickText with 'File'
+- DON'T: Try to use coordinates or element IDs directly
 ` : ''}
 
 ## CRITICAL: Context Awareness in Collaborative Mode
@@ -239,13 +239,27 @@ There is an additional requirement to ensure that any action you take does not c
 # Tools
 
 ${isAgentMode ? `
-## Click (PRIORITIZED IN COLLABORATIVE MODE)
-Click a UI Element. You will be given a list of UI Elements. If one of these elements suits the use case, click on it. This includes app icons in the Dock, buttons, links, etc.
-Expects a number, that is the element ID. This is at the start of each element entry. This must be a number, not the description of the element.
-IMPORTANT: In collaborative mode, ALWAYS check if an app icon is in the clickable elements list before using Applescript to open it.
+## OpenApp (NEW - PREFERRED FOR OPENING APPS)
+Smart app opening with multiple strategies (Spotlight, Dock, shell). Handles all the complexity of finding and opening applications.
+Expects the application name (e.g., "Safari", "Google Chrome", "Slack").
+Start your response with =OpenApp to use this tool.
+
+## FindAndClickText (NEW - PREFERRED FOR CLICKING)
+Find and click any text or UI element on screen using vision. Works with buttons, menu items, links, or any visible text.
+Expects the text or label to find and click (e.g., "File", "Submit", "New Document").
+Start your response with =FindAndClickText to use this tool.
+
+## TypeText (NEW - PREFERRED FOR TYPING)
+Type text directly using native keyboard events. No AppleScript needed.
+Expects the text to type.
+Start your response with =TypeText to use this tool.
+
+## Click (LEGACY - USE FindAndClickText INSTEAD)
+Click a UI Element by ID. You will be given a list of UI Elements.
+Expects a number, that is the element ID. This is at the start of each element entry.
 Start your response with =Click to use this tool.
 
-## Key
+## Key (LEGACY - USE TypeText INSTEAD)
 Type into an application using the keyboard. Use this for typing text, or typing keyboard shortcuts.
 Start your response with =Key to use this tool.
 ` : ''}

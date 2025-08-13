@@ -145,45 +145,39 @@ export async function performAction(
       // Vision-guided find and click by text label in collab mode (no AppleScript)
       case "=FindAndClickText": {
         const target = (body || '').trim();
-        if (!target) break;
-        const timestampFolder = `${process.cwd()}/logs/${Date.now()}-agent`;
-        try {
-          // 1) Try fast local OCR via Swift (no screenshot roundtrip)
-          try {
-            const { execPromise } = await import("./utils/utils");
-            const { stdout } = await execPromise(`swift swift/ocr.swift ${JSON.stringify(target)}`);
-            const data = JSON.parse(stdout || '{}');
-            if (data?.found && Number.isFinite(data.x) && Number.isFinite(data.y)) {
-              const x = Math.round(data.x); const y = Math.round(data.y);
-              await cursor.moveCursor({ x, y });
-              await new Promise(r => setTimeout(r, 80));
-              await cursor.performClick({ x, y });
-              event.sender.send("reply", { type: "action", message: `Clicked '${target}' at (${x}, ${y}) [local OCR]` });
-              return { type: "cursor-click", x, y } as any;
-            }
-          } catch {}
-
-          // 2) Fallback to Gemini vision using Electron screenshot
-          const { takeAndSaveScreenshots } = await import("./utils/screenshots");
-          const { geminiVision } = await import("./services/GeminiVisionService");
-          const screenshot = await takeAndSaveScreenshots("Desktop", timestampFolder);
-          const res = await geminiVision.analyzeScreenForElement(
-            screenshot,
-            `Clickable UI for text or label "${target}". Return FOUND: {x,y} for the clickable center.`
-          );
-          if (!res.found || res.x == null || res.y == null) {
-            event.sender.send("reply", { type: "action", message: `Could not find ${target}` });
-            return { type: "cursor-click", x: -1, y: -1, error: `Not found: ${target}` } as any;
-          }
-          const x = res.x, y = res.y;
-          await cursor.moveCursor({ x, y });
-          await new Promise(r => setTimeout(r, 120));
-          await cursor.performClick({ x, y });
-          event.sender.send("reply", { type: "action", message: `Clicked '${target}' at (${x}, ${y}) [gemini]` });
-          return { type: "cursor-click", x, y };
-        } catch (err: any) {
-          event.sender.send("reply", { type: "action", message: `Vision click failed: ${String(err?.message || err)}` });
-          return { type: "cursor-click", x: -1, y: -1, error: String(err?.message || err) } as any;
+        if (!target) {
+          event.sender.send("reply", { type: "action", message: "No target text specified" });
+          return { type: "error", message: "No target specified" } as any;
+        }
+        
+        logWithElapsed("performAction", `Finding and clicking: ${target}`);
+        
+        // Use the new AgentVisionService with feedback loops and retries
+        const { agentVision } = await import("./services/AgentVisionService");
+        const result = await agentVision.findAndClickText(target);
+        
+        if (result.success) {
+          event.sender.send("reply", { 
+            type: "action", 
+            message: result.message 
+          });
+          return { 
+            type: "cursor-click", 
+            x: result.coordinates?.x || -1, 
+            y: result.coordinates?.y || -1,
+            success: true 
+          } as any;
+        } else {
+          event.sender.send("reply", { 
+            type: "action", 
+            message: result.message 
+          });
+          return { 
+            type: "cursor-click", 
+            x: -1, 
+            y: -1,
+            error: result.message 
+          } as any;
         }
       }
 
@@ -193,6 +187,32 @@ export async function performAction(
         const res = await key(text, bundleId, { noAppleScriptFallback: true });
         event.sender.send("reply", { type: "action", message: `Typed text (${text.length} chars)` });
         return res as any;
+      }
+      
+      // Smart app opening with multiple strategies
+      case "=OpenApp": {
+        const appName = (body || '').trim();
+        if (!appName) {
+          event.sender.send("reply", { type: "action", message: "No app name specified" });
+          return { type: "error", message: "No app specified" } as any;
+        }
+        
+        logWithElapsed("performAction", `Opening app: ${appName}`);
+        
+        const { agentVision } = await import("./services/AgentVisionService");
+        const result = await agentVision.openApplication(appName);
+        
+        event.sender.send("reply", { 
+          type: "action", 
+          message: result.message 
+        });
+        
+        return { 
+          type: "open-app", 
+          app: appName,
+          success: result.success,
+          message: result.message
+        } as any;
       }
     }
   }
