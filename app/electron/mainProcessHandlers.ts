@@ -1941,28 +1941,27 @@ async function performVisualNavigation(appName: string, cursor: ReturnType<typeo
     
     console.log(`[VisualNav] Moving cursor to adjusted middle (${centerX}, ${centerY}) for better Spotlight opening`);
     await cursor.moveCursor({ x: centerX, y: centerY });
-    await new Promise(resolve => setTimeout(resolve, 300));
+    await new Promise(resolve => setTimeout(resolve, 200)); // Shorter pause
     
-    // Step 3: Initialize vision service and take initial screenshot to assess current state  
+    // Step 3: Open Spotlight immediately (no vision needed for this step)
+    console.log(`[VisualNav] Opening Spotlight with Cmd+Space...`);
+    await runAppleScript(`tell application "System Events" to keystroke space using command down`);
+    await new Promise(resolve => setTimeout(resolve, 800)); // Wait for Spotlight to open
+    
+    // Step 4: NOW use vision to find and adapt to Spotlight state
     const { GeminiVisionService } = await import("./services/GeminiVisionService");
     const visionService = new GeminiVisionService();
     const timestampFolder = createLogFolder(`spotlight-${Date.now()}`);
     
-    console.log(`[VisualNav] 👁️ Analyzing current screen state...`);
-    const initialScreenshot = await takeAndSaveScreenshots("Desktop", timestampFolder);
+    console.log(`[VisualNav] 👁️ Spotlight opened, now analyzing input field...`);
     
-    if (initialScreenshot) {
-      const stateResult = await visionService.analyzeScreenForElement(
-        initialScreenshot,
-        "Spotlight search window or search overlay at the top of screen"
-      );
+    try {
+      const screenshot = await takeAndSaveScreenshots("Desktop", timestampFolder);
       
-      if (stateResult.found) {
-        console.log(`[VisualNav] 👁️ Spotlight already open! Adapting flow...`);
-        
-        // Check if there's existing text in the search field
+      if (screenshot) {
+        // Check if there's existing text to clear first
         const textResult = await visionService.analyzeScreenForElement(
-          initialScreenshot,
+          screenshot,
           "text or content inside the Spotlight search input field"
         );
         
@@ -1974,25 +1973,8 @@ async function performVisualNavigation(appName: string, cursor: ReturnType<typeo
           await runAppleScript(`tell application "System Events" to key code 51`); // Delete key
           await new Promise(resolve => setTimeout(resolve, 300));
         }
-      } else {
-        console.log(`[VisualNav] 👁️ Spotlight not open, opening it...`);
-        await runAppleScript(`tell application "System Events" to keystroke space using command down`);
-        await new Promise(resolve => setTimeout(resolve, 1000)); // Wait for Spotlight to open
-      }
-    } else {
-      // Fallback: assume Spotlight needs to be opened
-      console.log(`[VisualNav] Screenshot failed, using fallback - opening Spotlight...`);
-      await runAppleScript(`tell application "System Events" to keystroke space using command down`);
-      await new Promise(resolve => setTimeout(resolve, 1000));
-    }
-    
-    // Step 4: Use vision to find and click Spotlight input field
-    console.log(`[VisualNav] 👁️ Using vision to find Spotlight input field...`);
-    
-    try {
-      const screenshot = await takeAndSaveScreenshots("Desktop", timestampFolder);
-      
-      if (screenshot) {
+        
+        // Now find and click the input field
               const inputResult = await visionService.analyzeScreenForElement(
         screenshot,
         "Spotlight search input text field - the white rectangular search box at the top center of the screen where you type"
