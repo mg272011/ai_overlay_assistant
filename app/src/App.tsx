@@ -1107,15 +1107,17 @@ function App() {
             </button>
 
             {/* Dropdown menu */}
-            {isMenuOpen === true && (
+            {/* Debug: Menu state = {isMenuOpen ? 'OPEN' : 'CLOSED'} */}
+            {isMenuOpen && (
               <div 
-                className="absolute right-0 top-[calc(100%+12px)] w-28 rounded-md z-[9999] glass liquid-panel shadow-xl pointer-events-auto"
+                className="fixed right-4 top-20 w-28 rounded-md shadow-xl pointer-events-auto"
                 style={{ 
-                  position: 'absolute',
+                  position: 'fixed',
                   pointerEvents: 'auto',
-                  zIndex: 99999,
-                  backgroundColor: 'rgba(20, 20, 40, 0.95)',
-                  border: '1px solid rgba(100, 100, 255, 0.3)'
+                  zIndex: 999999,
+                  backgroundColor: 'rgba(20, 20, 40, 0.98)',
+                  border: '2px solid rgba(100, 100, 255, 0.5)',
+                  backdropFilter: 'blur(10px)'
                 }}
               >
                 {/* Hide option */}
