@@ -1,7 +1,5 @@
 import "dotenv/config";
 import { app, BrowserWindow, Notification, nativeImage, screen, globalShortcut } from "electron";
-// @ts-ignore - Native module without type definitions
-import liquidGlass from "electron-liquid-glass";
 
 // Debug: Check if API keys are loaded
 console.log("🔍 Environment check:");
@@ -87,30 +85,8 @@ function createWindow() {
     win.webContents.on("did-finish-load", () => {
     win?.webContents.send("main-process-message", new Date().toLocaleString());
     
-    // 🪄 Apply liquid glass effect 🪄
-    if (win && process.platform === 'darwin') {
-      try {
-        console.log('[LiquidGlass] Applying native macOS liquid glass effect...');
-        const glassId = liquidGlass.addView(win.getNativeWindowHandle(), {
-          cornerRadius: 24, // Nice rounded corners 
-          tintColor: "#00000015", // Subtle dark tint
-          opaque: false // Keep transparency
-        });
-        
-        // Apply glass variant for extra effect (experimental)
-        try {
-          liquidGlass.unstable_setVariant(glassId, 2);
-          console.log('[LiquidGlass] ✅ Applied variant 2 for enhanced glass effect');
-        } catch (err) {
-          console.log('[LiquidGlass] Variant setting not available:', err);
-        }
-        
-        console.log('[LiquidGlass] ✅ Native liquid glass effect applied successfully!');
-      } catch (error) {
-        console.error('[LiquidGlass] ❌ Failed to apply liquid glass effect:', error);
-        console.log('[LiquidGlass] Falling back to CSS backdrop-filter effects');
-      }
-    }
+    // 🎨 Using CSS-based glass effects (more reliable across different systems)
+    console.log('[Glass] Using CSS backdrop-filter effects for cross-platform compatibility');
   });
 
   if (VITE_DEV_SERVER_URL) {
