@@ -2031,12 +2031,17 @@ async function performVisualNavigation(appName: string, cursor: ReturnType<typeo
         console.log(`[VisualNav] 👁️ Vision found Spotlight input at (${inputResult.x}, ${inputResult.y})`);
         await cursor.moveCursor({ x: inputResult.x, y: inputResult.y });
         await new Promise(resolve => setTimeout(resolve, 200));
-                  // Use SwiftMouse for human-like click
-          try {
-            await SwiftMouse.click();
-            console.log('[Agent] Clicked with SwiftMouse');
-          } catch (swiftError) {
-            console.log('[Agent] SwiftMouse failed, using virtual cursor:', swiftError);
+                  // Use virtual cursor by default (doesn't take over user's mouse)
+          // To enable SwiftMouse: set USE_SWIFT_MOUSE=true in environment
+          if (process.env.USE_SWIFT_MOUSE === 'true') {
+            try {
+              await SwiftMouse.click();
+              console.log('[Agent] Clicked with SwiftMouse (takes over real mouse)');
+            } catch (swiftError) {
+              console.log('[Agent] SwiftMouse failed, using virtual cursor:', swiftError);
+              await cursor.performClick({ x: inputResult.x, y: inputResult.y });
+            }
+          } else {
             await cursor.performClick({ x: inputResult.x, y: inputResult.y });
           }
       } else {
@@ -2047,12 +2052,16 @@ async function performVisualNavigation(appName: string, cursor: ReturnType<typeo
         console.log(`[VisualNav] Using fallback Spotlight input position at (${inputX}, ${inputY})`);
         await cursor.moveCursor({ x: inputX, y: inputY });
         await new Promise(resolve => setTimeout(resolve, 200));
-                  // Use SwiftMouse for human-like click
-          try {
-            await SwiftMouse.click();
-            console.log('[Agent] Clicked with SwiftMouse');
-          } catch (swiftError) {
-            console.log('[Agent] SwiftMouse failed, using virtual cursor:', swiftError);
+                  // Use virtual cursor by default (doesn't take over user's mouse)
+          if (process.env.USE_SWIFT_MOUSE === 'true') {
+            try {
+              await SwiftMouse.click();
+              console.log('[Agent] Clicked with SwiftMouse (takes over real mouse)');
+            } catch (swiftError) {
+              console.log('[Agent] SwiftMouse failed, using virtual cursor:', swiftError);
+              await cursor.performClick({ x: inputX, y: inputY });
+            }
+          } else {
             await cursor.performClick({ x: inputX, y: inputY });
           }
       }
@@ -2078,12 +2087,16 @@ async function performVisualNavigation(appName: string, cursor: ReturnType<typeo
         console.log(`[VisualNav] 👁️ Vision found ${appName} at (${appResult.x}, ${appResult.y})`);
         await cursor.moveCursor({ x: appResult.x, y: appResult.y });
         await new Promise(resolve => setTimeout(resolve, 200));
-                  // Use SwiftMouse for human-like click
-          try {
-            await SwiftMouse.click();
-            console.log('[Agent] Clicked app with SwiftMouse');
-          } catch (swiftError) {
-            console.log('[Agent] SwiftMouse failed, using virtual cursor:', swiftError);
+                  // Use virtual cursor by default (doesn't take over user's mouse)
+          if (process.env.USE_SWIFT_MOUSE === 'true') {
+            try {
+              await SwiftMouse.click();
+              console.log('[Agent] Clicked app with SwiftMouse (takes over real mouse)');
+            } catch (swiftError) {
+              console.log('[Agent] SwiftMouse failed, using virtual cursor:', swiftError);
+              await cursor.performClick({ x: appResult.x, y: appResult.y });
+            }
+          } else {
             await cursor.performClick({ x: appResult.x, y: appResult.y });
           }
       } else {
