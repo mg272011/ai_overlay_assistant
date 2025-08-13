@@ -141,6 +141,48 @@ export async function performAction(
         }
         break;
       }
+
+      // Vision-guided find and click by text label in collab mode (no AppleScript)
+      case "=FindAndClickText": {
+        const target = (body || '').trim();
+        if (!target) break;
+        const { takeAndSaveScreenshots } = await import("./utils/screenshots");
+        const { geminiVision } = await import("./services/GeminiVisionService");
+        const timestampFolder = `${process.cwd()}/logs/${Date.now()}-agent`;
+        try {
+          // Capture screen quickly
+          const screenshot = await takeAndSaveScreenshots("Desktop", timestampFolder);
+          // Ask vision to find the element center
+          const res = await geminiVision.analyzeScreenForElement(
+            screenshot,
+            `Clickable UI for text or label "${target}". Return FOUND: {x,y} for the clickable center.`
+          );
+          if (!res.found || res.x == null || res.y == null) {
+            event.sender.send("reply", { type: "action", message: `Could not find ${target}` });
+            return { type: "cursor-click", x: -1, y: -1, error: `Not found: ${target}` } as any;
+          }
+          const x = res.x, y = res.y;
+          // Move AI cursor visually first
+          await cursor.moveCursor({ x, y });
+          // Small pause for stability
+          await new Promise(r => setTimeout(r, 120));
+          // Click using Swift-based click
+          await cursor.performClick({ x, y });
+          event.sender.send("reply", { type: "action", message: `Clicked '${target}' at (${x}, ${y})` });
+          return { type: "cursor-click", x, y };
+        } catch (err: any) {
+          event.sender.send("reply", { type: "action", message: `Vision click failed: ${String(err?.message || err)}` });
+          return { type: "cursor-click", x: -1, y: -1, error: String(err?.message || err) } as any;
+        }
+      }
+
+      // Type text via Swift key tool in collab mode (no AppleScript)
+      case "=TypeText": {
+        const text = body ?? '';
+        const res = await key(text, bundleId);
+        event.sender.send("reply", { type: "action", message: `Typed text (${text.length} chars)` });
+        return res as any;
+      }
     }
   }
 
