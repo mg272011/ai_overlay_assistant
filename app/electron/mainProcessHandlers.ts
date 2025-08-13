@@ -537,14 +537,32 @@ Provide a concise response in 3-4 sentences.`;
             console.log('[MeetingChat] 🔍 Making API call to Gemini...');
             const result = await model.generateContent(prompt);
             console.log('[MeetingChat] 🔍 API call completed, processing result...');
+            console.log('[MeetingChat] 🔍 Result object:', result);
+            console.log('[MeetingChat] 🔍 Result.response:', result.response);
+            console.log('[MeetingChat] 🔍 Result.response.text:', typeof result.response?.text);
             
-            const fullResponse = result.response.text();
+            let fullResponse = '';
+            try {
+              fullResponse = result.response?.text?.() || '';
+              console.log('[MeetingChat] 🔍 Called text() successfully');
+            } catch (textError) {
+              console.error('[MeetingChat] 🔍 Error calling text():', textError);
+              // Try alternative access methods
+              if (result.response?.candidates?.[0]?.content?.parts?.[0]?.text) {
+                fullResponse = result.response.candidates[0].content.parts[0].text;
+                console.log('[MeetingChat] 🔍 Got response from candidates structure');
+              }
+            }
+            
             console.log('[MeetingChat] 🔍 RAW FULL RESPONSE:', JSON.stringify(fullResponse));
-            console.log('[MeetingChat] 🔍 Response length:', fullResponse.length);
-            console.log('[MeetingChat] 🔍 Response preview:', fullResponse.substring(0, 200));
+            console.log('[MeetingChat] 🔍 Response type:', typeof fullResponse);
+            console.log('[MeetingChat] 🔍 Response length:', fullResponse?.length || 0);
+            console.log('[MeetingChat] 🔍 Response preview:', fullResponse?.substring?.(0, 200) || 'N/A');
+            console.log('[MeetingChat] 🔍 Response trimmed empty?:', (!fullResponse || fullResponse.trim().length === 0));
             
             if (!fullResponse || fullResponse.trim().length === 0) {
               console.error('[MeetingChat] 🔍 ❌ EMPTY RESPONSE FROM GEMINI!');
+              console.error('[MeetingChat] 🔍 ❌ Full result object for debugging:', JSON.stringify(result, null, 2));
               send('text', 'I received an empty response. Please try your search again.');
               send('stream_end');
               return;
@@ -1993,18 +2011,18 @@ async function performVisualNavigation(appName: string, cursor: ReturnType<typeo
         await cursor.performClick({ x: appResult.x, y: appResult.y });
       } else {
         // Fallback to first result
-        const display = screen.getPrimaryDisplay();
+              const display = screen.getPrimaryDisplay();
         const resultX = Math.floor(display.bounds.width / 2);
         const resultY = Math.floor(display.bounds.height * 0.25);
         console.log(`[VisualNav] Using fallback first result position at (${resultX}, ${resultY})`);
         await cursor.moveCursor({ x: resultX, y: resultY });
-        await new Promise(resolve => setTimeout(resolve, 200));
+            await new Promise(resolve => setTimeout(resolve, 200));
         await cursor.performClick({ x: resultX, y: resultY });
       }
     }
     
     // Step 6: Wait for app to launch
-    await new Promise(resolve => setTimeout(resolve, 1000));
+              await new Promise(resolve => setTimeout(resolve, 1000));
     
     // Step 5: Verify the app opened successfully
     let opened = false;
