@@ -88,8 +88,8 @@ export class VirtualCursorWindow {
     // Make window click-through
     this.window.setIgnoreMouseEvents(true);
     this.window.setVisibleOnAllWorkspaces(true);
-    // Use floating level instead of screen-saver to reduce interference
-    this.window.setAlwaysOnTop(true, 'floating');
+    // Use screen-saver level to stay above system overlays like Spotlight
+    this.window.setAlwaysOnTop(true, 'screen-saver');
 
     // Load the cursor HTML
     const htmlPath = path.join(app.getAppPath(), "virtual-cursor.html");
@@ -119,7 +119,7 @@ export class VirtualCursorWindow {
         await this.create();
       }
       this.window?.show();
-      this.window?.setAlwaysOnTop(true, 'floating');
+      this.window?.setAlwaysOnTop(true, 'screen-saver');
       this.window?.setVisibleOnAllWorkspaces(true);
       // Ensure mouse events are always ignored to prevent blocking main app
       this.window?.setIgnoreMouseEvents(true);
@@ -127,6 +127,15 @@ export class VirtualCursorWindow {
       console.log('[VirtualCursorWindow] Cursor window shown and set to always on top (click-through enabled)');
     } catch (error) {
       console.error('[VirtualCursorWindow] Error showing cursor window:', error);
+    }
+  }
+
+  bringToFront(): void {
+    if (this.window) {
+      this.window.setAlwaysOnTop(true, 'screen-saver');
+      this.window.focus();
+      this.window.show();
+      console.log('[VirtualCursorWindow] Cursor brought to front above all windows');
     }
   }
 
@@ -150,6 +159,10 @@ export class VirtualCursorWindow {
       console.log('[VirtualCursorWindow] Window not visible, showing it');
       await this.show();
     }
+    
+    // Always ensure cursor stays on top when moving (especially during Spotlight)
+    this.window?.setAlwaysOnTop(true, 'screen-saver');
+    this.window?.focus();
     
     console.log(`[VirtualCursorWindow] Moving cursor to (${position.x}, ${position.y})`);
     
@@ -243,6 +256,9 @@ export class VirtualCursorWindow {
     if (!this.window) return;
 
     console.log(`[VirtualCursorWindow] performClick called at (${position.x}, ${position.y})`);
+    
+    // Ensure cursor is visible above everything (especially Spotlight)
+    this.bringToFront();
 
     // Show click animation
     this.window.webContents.send("show-click-animation", position);
