@@ -50,7 +50,20 @@
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+
+  /* 🪄 Liquid Glass CSS Variables */
+  --glass-inner-shadow-blur: 20px;
+  --glass-inner-shadow-spread: -5px;
+  --glass-inner-shadow-color: rgba(255, 255, 255, 0.7);
+  --glass-tint-color: 255, 255, 255;
+  --glass-tint-opacity: 0.15;
+  --glass-frost-blur: 20px;
+  --glass-noise-frequency: 0.008;
+  --glass-distortion-strength: 45;
+  --glass-outer-shadow-blur: 24px;
 }
+
+/* 🪄 SVG Filter for noise distortion temporarily disabled for compatibility */
 
 body {
   margin: 0;
@@ -519,36 +532,80 @@ button, input, form, [onclick] {
   to { transform: translateY(-8px) scale(0.97); opacity: 0; }
 }
 
-/* Make existing glass classes use the liquid glass effect */
+/* 🪄 Enhanced Liquid Glass Effect */
 .glass { 
-  background: linear-gradient(135deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0.05) 50%, rgba(255, 255, 255, 0.15) 100%) !important; 
-  border-radius: var(--glass-radius); 
-  box-shadow: var(--glass-shadow) !important; 
-  backdrop-filter: blur(20px) saturate(180%) contrast(120%) brightness(110%) hue-rotate(5deg) !important; 
-  -webkit-backdrop-filter: blur(20px) saturate(180%) contrast(120%) brightness(110%) hue-rotate(5deg) !important; 
+  position: relative;
+  isolation: isolate;
+  border-radius: var(--glass-radius);
+  box-shadow: 0px 6px var(--glass-outer-shadow-blur) rgba(0, 0, 0, 0.2);
 }
-/* Main bar - liquid glass effect with color refraction */
+
+.glass::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border-radius: inherit;
+  box-shadow: inset 0 0 var(--glass-inner-shadow-blur) var(--glass-inner-shadow-spread) var(--glass-inner-shadow-color);
+  background-color: rgba(var(--glass-tint-color), var(--glass-tint-opacity));
+  pointer-events: none;
+}
+
+.glass::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  backdrop-filter: blur(var(--glass-frost-blur)) saturate(180%) contrast(120%) brightness(110%) hue-rotate(5deg);
+  -webkit-backdrop-filter: blur(var(--glass-frost-blur)) saturate(180%) contrast(120%) brightness(110%) hue-rotate(5deg);
+  /* filter: url(#glass-distortion); - Temporarily disabled */
+  /* -webkit-filter: url("#glass-distortion"); - Temporarily disabled */
+  isolation: isolate;
+  pointer-events: none;
+}
+/* 🪄 Main bar - Enhanced Liquid Glass with Pill Shape */
 .mainbar-glass {
   position: relative;
-  background: linear-gradient(135deg, 
-    rgba(255, 255, 255, 0.1) 0%,
-    rgba(255, 255, 255, 0.05) 50%,
-    rgba(255, 255, 255, 0.15) 100%) !important;
-  /* Enhanced backdrop filter for color bending/refraction */
-  backdrop-filter: blur(20px) saturate(180%) contrast(120%) brightness(110%) hue-rotate(5deg) !important;
-  -webkit-backdrop-filter: blur(20px) saturate(180%) contrast(120%) brightness(110%) hue-rotate(5deg) !important;
+  isolation: isolate;
   border-radius: 9999px; /* Keep pill shape for mainbar */
   border: 0.25px solid rgba(255, 255, 255, 0.3) !important;
-  box-shadow: 
-    0 8px 32px rgba(31, 38, 135, 0.15), /* Blue-ish shadow for depth */
-    0 4px 16px rgba(255, 255, 255, 0.1) inset,
-    inset 0 2px 0 rgba(255, 255, 255, 0.6),
-    inset 0 -2px 0 rgba(255, 255, 255, 0.2),
-    inset 0 0 20px 10px rgba(255, 255, 255, 0.08) !important;
+  box-shadow: 0px 8px var(--glass-outer-shadow-blur) rgba(31, 38, 135, 0.15);
   overflow: hidden;
-  /* Add chromatic aberration-like effect */
   transform: translateZ(0);
   will-change: transform;
+}
+
+.mainbar-glass::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border-radius: inherit;
+  box-shadow: 
+    inset 0 0 var(--glass-inner-shadow-blur) var(--glass-inner-shadow-spread) var(--glass-inner-shadow-color),
+    inset 0 2px 0 rgba(255, 255, 255, 0.6),
+    inset 0 -2px 0 rgba(255, 255, 255, 0.2),
+    inset 0 0 20px 10px rgba(255, 255, 255, 0.08);
+  background: linear-gradient(135deg, 
+    rgba(var(--glass-tint-color), 0.1) 0%,
+    rgba(var(--glass-tint-color), 0.05) 50%,
+    rgba(var(--glass-tint-color), 0.15) 100%);
+  pointer-events: none;
+}
+
+.mainbar-glass::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  backdrop-filter: blur(var(--glass-frost-blur)) saturate(180%) contrast(120%) brightness(110%) hue-rotate(5deg);
+  -webkit-backdrop-filter: blur(var(--glass-frost-blur)) saturate(180%) contrast(120%) brightness(110%) hue-rotate(5deg);
+  /* filter: url(#glass-distortion); - Temporarily disabled */
+  /* -webkit-filter: url("#glass-distortion"); - Temporarily disabled */
+  isolation: isolate;
+  pointer-events: none;
 }
 
 /* Removed shimmer animation that was causing glare */
