@@ -607,6 +607,16 @@ Provide a helpful response with key information about the topic.`;
             if (!fullResponse || fullResponse.trim().length === 0) {
               console.error('[MeetingChat] 🔍 ❌ EMPTY RESPONSE FROM GEMINI!');
               console.error('[MeetingChat] 🔍 ❌ Full result object for debugging:', JSON.stringify(result, null, 2));
+              
+              // Try to extract from candidates structure as fallback
+              if (result?.candidates?.[0]?.content?.parts?.[0]?.text) {
+                const fallbackResponse = result.candidates[0].content.parts[0].text;
+                console.log('[MeetingChat] 🔍 Using fallback response from candidates:', fallbackResponse);
+                send('text', fallbackResponse);
+                send('stream_end');
+                return;
+              }
+              
               send('text', 'I received an empty response. Please try your search again.');
               send('stream_end');
               return;
