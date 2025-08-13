@@ -530,18 +530,18 @@ ${seed}`;
               model: "gemini-2.5-flash",
               generationConfig: {
                 temperature: 0.3,
-                maxOutputTokens: 150, // 3-4 sentences
+                maxOutputTokens: 400, // Enough for a complete search response
               }
             });
             console.log('[MeetingChat] 🔍 Model configured successfully');
             
             const prompt = `You are a helpful assistant performing a web search for the user. 
-Write exactly 3-4 clear, informative sentences answering the query.
-Be direct and include the most important facts.
+Provide a clear, informative response with the most important and relevant facts.
+Be direct and comprehensive but concise.
 
 Web search query: "${searchQuery}"
 
-Provide a concise response in 3-4 sentences.`;
+Provide a helpful response with key information about the topic.`;
             
             // Generate response
             console.log('[MeetingChat] 🔍 Calling Gemini with prompt length:', prompt.length);

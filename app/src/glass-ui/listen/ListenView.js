@@ -31,7 +31,7 @@ export class ListenView extends LitElement {
       border-radius: 12px;
       width: 100%;
       height: auto;
-      min-height: 380px; /* Ensure minimum height for content */
+      min-height: 120px; /* Much smaller minimum for adaptive sizing */
       max-height: 420px; /* Slightly increased */
       pointer-events: auto;
       border: 0.5px solid rgba(255, 255, 255, 0.3);

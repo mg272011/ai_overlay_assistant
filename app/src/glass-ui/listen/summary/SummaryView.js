@@ -15,9 +15,10 @@ export class SummaryView extends LitElement {
       padding: 8px 16px 12px 16px; /* tightened top/bottom spacing */
       position: relative;
       z-index: 1;
-      min-height: 150px;
-      max-height: 560px;
+      min-height: 50px; /* Much smaller minimum to fit content */
+      max-height: 420px; /* Reduced max height */
       flex: 1;
+      height: auto; /* Let it adapt to content */
     }
 
     .insights-container::-webkit-scrollbar {
