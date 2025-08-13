@@ -110,3 +110,24 @@ contextBridge.exposeInMainWorld('api', {
     },
   },
 });
+
+// Bridge for electronAPI (used by meeting actions)
+contextBridge.exposeInMainWorld('electronAPI', {
+  send: (channel: string, data: any) => {
+    console.log('[Preload] electronAPI.send called:', channel, data);
+    return ipcRenderer.send(channel, data);
+  },
+  on: (channel: string, callback: (data: any) => void) => {
+    console.log('[Preload] electronAPI.on called for channel:', channel);
+    const handler = (_: any, data: any) => {
+      console.log('[Preload] electronAPI received event on channel:', channel, 'data:', data);
+      callback(data);
+    };
+    ipcRenderer.on(channel, handler);
+    return handler;
+  },
+  removeListener: (channel: string, listener: any) => {
+    console.log('[Preload] electronAPI.removeListener called for channel:', channel);
+    return ipcRenderer.removeListener(channel, listener);
+  }
+});
