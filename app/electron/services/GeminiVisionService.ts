@@ -123,7 +123,7 @@ Be concise and accurate.`;
     };
     
     const promptWithImage: any[] = [assessmentPrompt, imagePart];
-    const model = this.genAI.getGenerativeModel({ model: "gemini-2.0-flash-exp" });
+          const model = this.genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
     return retry(async () => {
       try {

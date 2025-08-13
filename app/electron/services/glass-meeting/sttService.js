@@ -356,7 +356,7 @@ GlassSttService.prototype.correctIfObvious = async function (text) {
         if (!this.gemini) return original;
         // Keep this very fast: only short-ish segments
         if (original.length > 220) return original;
-        const model = this.gemini.getGenerativeModel({ model: 'gemini-2.0-flash-exp' });
+                    const model = this.gemini.getGenerativeModel({ model: 'gemini-2.5-flash' });
         const prompt = `You are a lightning-fast transcription corrector.
 Return ONLY the corrected input with minimal edits.
 - Fix obvious ASR mistakes, misspellings, and wrong-word homophones

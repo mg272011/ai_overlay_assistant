@@ -413,18 +413,21 @@ export function setupMainHandlers({ win }: { win: InstanceType<typeof BrowserWin
       };
 
       if (action?.type === 'say-next') {
-        // Better prompt for more specific suggestions
+        // Better prompt for more specific suggestions using Gemini 2.5 Flash
         try {
-          const openaiKey = process.env.OPENAI_API_KEY;
-          if (openaiKey) {
-            const { default: OpenAI } = await import('openai');
-            const openai = new OpenAI({ apiKey: openaiKey } as any);
-            const completion = await openai.chat.completions.create({
-              model: 'gpt-4o-mini',
-              messages: [
-                { 
-                  role: 'system', 
-                  content: `You suggest exactly what someone should say next in a meeting. 
+          const geminiKey = process.env.GEMINI_API_KEY;
+          if (geminiKey) {
+            const { GoogleGenerativeAI } = await import("@google/generative-ai");
+            const genAI = new GoogleGenerativeAI(geminiKey);
+            const model = genAI.getGenerativeModel({ 
+              model: "gemini-2.5-flash",
+              generationConfig: {
+                temperature: 0.5,
+                maxOutputTokens: 150, // Slightly longer for better suggestions
+              }
+            });
+            
+            const prompt = `You suggest exactly what someone should say next in a meeting. 
 
 Your response should be:
 - A complete sentence or question they can actually say
@@ -439,27 +442,13 @@ Examples of good responses:
 - "That makes sense. What resources do we need to make that happen?"
 - "Let me summarize what I heard: we're moving forward with option B, targeting mid-January. Is that correct?"
 
-Do NOT say things like "Consider asking..." or "You might want to..." - just provide the actual words to say.`
-                },
-                { role: 'user', content: seed }
-              ],
-              temperature: 0.5,
-              max_tokens: 100,
-            });
-            const text = completion.choices?.[0]?.message?.content?.trim() || 'Could you elaborate on that last point?';
-            // Remove any quotes from the response
-            const cleanText = text.replace(/^["']|["']$/g, '');
+Do NOT say things like "Consider asking..." or "You might want to..." - just provide the actual words to say.
+
+${seed}`;
             
-            // Stream it word by word for animation
-            const words = cleanText.split(' ');
-            let currentText = '';
-            
-            for (let i = 0; i < words.length; i++) {
-              currentText += (i > 0 ? ' ' : '') + words[i];
-              send('text', currentText);
-              await new Promise(resolve => setTimeout(resolve, 50)); // Small delay between words
-            }
-            
+            const result = await model.generateContent(prompt);
+            const text = result.response.text()?.trim() || 'Could you elaborate on that last point?';
+            send('text', text);
             send('stream_end');
           } else {
             // Fallback deterministic text
@@ -474,100 +463,55 @@ Do NOT say things like "Consider asking..." or "You might want to..." - just pro
         return;
       }
 
-      // For search actions: use Gemini 2.5 Flash for fast, comprehensive responses
+      // For search actions: use Gemini 2.5 Flash for faster, longer responses
       if (action?.type === 'search' && (action?.query || action?.text)) {
         const searchQuery = action.query || action.text;
-        console.log('[MeetingChat] Processing search action with Gemini 2.5 Flash:', searchQuery);
+        console.log('[MeetingChat] Processing search action:', searchQuery);
         
         try {
-          // Try Gemini first for speed
-          const geminiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
+          const geminiKey = process.env.GEMINI_API_KEY;
           if (geminiKey) {
-            const { GoogleGenerativeAI } = await import('@google/generative-ai');
+            const { GoogleGenerativeAI } = await import("@google/generative-ai");
             const genAI = new GoogleGenerativeAI(geminiKey);
-            
-            // Use Gemini Flash Latest (2.5 equivalent) for speed and quality
             const model = genAI.getGenerativeModel({ 
-              model: 'gemini-2.5-flash', // Latest Gemini Flash model (Dec 2024) 
+              model: "gemini-2.5-flash",
               generationConfig: {
-                temperature: 0.4,
-                maxOutputTokens: 1200, // Much longer responses
-                topK: 40,
-                topP: 0.95,
+                temperature: 0.3,
+                maxOutputTokens: 1500, // Much longer responses
               }
             });
             
-            const prompt = `You are performing a web search and providing comprehensive information.
+            const prompt = `You are a helpful assistant performing a web search for the user. 
+Provide informative, comprehensive answers as if you just searched the web.
+Be thorough and detailed. Format your response in a clear, easy-to-read way.
+If the query is about recent events or specific locations, acknowledge that you're providing general information.
 
-Search query: "${searchQuery}"
+Web search query: "${searchQuery}"
 
-Provide a detailed, informative response that covers:
-- Key facts and information
-- Relevant details and context
-- Practical insights or tips if applicable
-- Multiple perspectives if relevant
-
-Be thorough but well-organized. Use bullet points or sections where helpful.
-Write at least 3-4 paragraphs of substantial information.`;
-
-            // Stream the response for better UX
-            const result = await model.generateContentStream(prompt);
+Provide a helpful, detailed response based on this search query.`;
             
-            let fullResponse = '';
-            for await (const chunk of result.stream) {
-              const chunkText = chunk.text();
-              if (chunkText) {
-                fullResponse += chunkText;
-                send('text', fullResponse);
-              }
+            // Generate response
+            const result = await model.generateContent(prompt);
+            const fullResponse = result.response.text();
+            
+            // Stream the response in chunks for better UX
+            const chunkSize = 50; // Characters per chunk
+            for (let i = 0; i < fullResponse.length; i += chunkSize) {
+              const chunk = fullResponse.slice(0, i + chunkSize);
+              send('text', chunk);
+              await new Promise(resolve => setTimeout(resolve, 20)); // Small delay for streaming effect
             }
             
             send('stream_end');
-            console.log('[MeetingChat] Gemini 2.5 Flash search response completed');
-            
+            console.log('[MeetingChat] Search response completed');
           } else {
-            // Fallback to OpenAI if no Gemini key
-            const openaiKey = process.env.OPENAI_API_KEY;
-            if (openaiKey) {
-              const { default: OpenAI } = await import('openai');
-              const openai = new OpenAI({ apiKey: openaiKey } as any);
-              
-              const stream = await openai.chat.completions.create({
-                model: 'gpt-4o-mini',
-                messages: [
-                  { 
-                    role: 'system', 
-                    content: `You are performing a web search. Provide comprehensive, detailed information.
-                    Write at least 3-4 substantial paragraphs covering all aspects of the query.` 
-                  },
-                  { 
-                    role: 'user', 
-                    content: `Search: "${searchQuery}"` 
-                  }
-                ],
-                temperature: 0.4,
-                max_tokens: 800,
-                stream: true,
-              });
-              
-              let fullResponse = '';
-              for await (const chunk of stream) {
-                const content = chunk.choices[0]?.delta?.content || '';
-                if (content) {
-                  fullResponse += content;
-                  send('text', fullResponse);
-                }
-              }
-              
-              send('stream_end');
-            } else {
-              send('text', `Configure GEMINI_API_KEY or OPENAI_API_KEY for search results.`);
-              send('stream_end');
-            }
+            // Fallback if no Gemini key
+            send('text', `I would search for: "${searchQuery}"\n\nUnfortunately, I need a Gemini API key configured to provide search results.`);
+            send('stream_end');
           }
         } catch (err) {
           console.error('[MeetingChat] Search failed:', err);
-          send('text', `Searching for information about "${searchQuery}"...`);
+          send('text', `Search for "${searchQuery}" - Unable to complete search at this time.`);
           send('stream_end');
         }
         return;

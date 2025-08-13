@@ -597,12 +597,12 @@ function App() {
             console.log('[App] Refreshing existing say-next chat:', sayNextId);
             // Clear old messages and show new loading state
             return prev.map(c => c.id === existing.id 
-              ? { ...c, messages: [], streaming: true, currentStream: '' }
+              ? { ...c, messages: [], streaming: true, currentStream: 'Generating suggestion based on latest conversation...' }
               : c
             );
           }
           console.log('[App] Creating new say-next chat:', id);
-          return [...prev, { id, title, messages: [], streaming: true, currentStream: '', ...( { sayNext: true } as any) } as any];
+          return [...prev, { id, title, messages: [], streaming: true, currentStream: 'Generating suggestion based on latest conversation...', ...( { sayNext: true } as any) } as any];
         });
         setIsChatPaneVisible(true);
         // Kick off the say-next stream in main process using recent context
@@ -826,7 +826,7 @@ function App() {
   }, [isStreaming, agentMode, typewriterFullText]);
 
   return (
-    <div className="w-full h-full flex flex-col items-center justify-start gap-1 pt-2 bg-transparent pointer-events-none relative">
+    <div className="w-full h-full flex flex-col items-center justify-start gap-1 pt-2 bg-transparent pointer-events-none">
       {/* Clonely-style Mainbar */}
       <div id="mainbar" className="glass mainbar-glass liquid-frost rounded-full font-sans flex-none w-[28vw] h-[5.5vh] max-w-[28vw] max-h-[5.5vh] px-2 pointer-events-auto">
                   <div className="flex items-center justify-center gap-1.5 w-full h-full">
@@ -1125,7 +1125,7 @@ function App() {
       {/* AI Pane - Stays open when agent is working */}
       <div id="chat-pane" className={`overflow-hidden liquid-animate ${
         (isChatPaneVisible || isStreaming || messages.length > 0 || highlightChatVisible || meetingChats.length > 0) ? 'max-h-[70vh] opacity-100 liquid-open' : 'max-h-0 opacity-0 liquid-closed'
-      } px-4 ${isLiveMode ? 'w-[60vw]' : 'w-[40vw]'} pointer-events-auto mx-auto mt-4`}>
+      } px-4 ${isLiveMode ? 'w-[60vw]' : 'w-[40vw]'} pointer-events-auto`}>
         <div className={`max-h-full w-full bg-transparent p-2 gap-3 ${isLiveMode ? 'meeting-panels' : 'flex'}`}>
           {/* Left Panel - Transcript (only in live mode) - CENTERED by default */}
           {isLiveMode && (
@@ -1161,12 +1161,12 @@ function App() {
                     ))}
                     {chat.currentStream && (
                       <div className="text-white whitespace-pre-wrap">
-                        {chat.currentStream.replace(/^["']|["']$/g, '')}
+                        {chat.currentStream}
                         {chat.streaming && <span className="inline-block w-0.5 h-4 bg-white ml-1 animate-pulse"></span>}
                       </div>
                     )}
                     {!chat.streaming && chat.messages.length === 0 && !chat.currentStream && (
-                      <div className="text-white/60 text-sm">...</div>
+                      <div className="text-white/60 text-sm">Generating suggestions based on conversation...</div>
                     )}
                   </div>
                 ))}
@@ -1280,12 +1280,16 @@ function App() {
             
             {/* Regular Chat/Command Content */}
           {!highlightChatVisible && !isLiveMode && (
-            <div className="flex-1 flex flex-col h-full gap-2 min-w-0 text-sm max-h-[65vh] pointer-events-auto w-full">
-              <div className="flex-1 glass-chat-container w-full">
+            <div className="flex-1 flex flex-col h-full gap-2 min-w-0 text-sm max-h-[65vh] pointer-events-auto mx-auto" style={{ width: '420px', minWidth: '380px', maxWidth: '440px' }}>
+              <div className="flex-1 glass liquid-panel rounded-2xl flex flex-col overflow-hidden">
                {/* Agent Status Bar with Mode Toggle */}
-               <div className="glass-chat-header">
+               <div className="glass-chat-header px-4 pt-3 pb-2">
                  <div className="flex items-center justify-between">
-                   <div className="flex items-center gap-3"></div>
+                   <div className="flex items-center gap-3">
+                     <span className="text-xs text-white/70">
+                       {agentMode === 'chat' ? 'Ask Mode' : 'Agent Mode'}
+                     </span>
+                   </div>
                    {/* Close button */}
                    {!isStreaming && (
                      <button
@@ -1307,21 +1311,21 @@ function App() {
                  </div>
                </div>
                
-               <div className="glass-chat-content">
+               <div className="flex-1 p-4 overflow-y-auto text-sm leading-relaxed" style={{ maxHeight: 'calc(65vh - 120px)' }}>
                  {messages.map((msg, i) => (
-                   <div key={i} className={`glass-message ${msg.type === "error" ? "error" : "assistant"}`}>
+                   <div key={i} className={`mb-3 p-3 rounded-xl liquid-panel text-white/90`}>
                      <div className="font-semibold mb-1">{msg.type.charAt(0).toUpperCase() + msg.type.slice(1)}</div>
                      <div className="whitespace-pre-wrap">{msg.message}</div>
                    </div>
                  ))}
 
                  {(agentMode === 'chat' && !isStreaming && typewriterText) ? (
-                   <div className="glass-message streaming">
+                   <div className="p-3 rounded-xl liquid-panel text-white/90">
                      <div className="font-semibold mb-1">Response</div>
                      <div className="whitespace-pre-wrap">{typewriterText}</div>
                    </div>
                  ) : (isStreaming || currentStream) && (
-                   <div className="glass-message streaming">
+                   <div className="p-3 rounded-xl liquid-panel text-white/90">
                      <div className="font-semibold mb-1">{isStreaming ? "Thinking..." : "Response"}</div>
                      <div className="whitespace-pre-wrap">
                        {agentMode === 'chat' && isStreaming ? null : currentStream}
@@ -1330,31 +1334,72 @@ function App() {
                    </div>
                  )}
 
+                 {!currentStream && messages.length === 0 && !typewriterText && (
+                   <div className="flex flex-col items-center justify-center text-white/70 py-8">
+                     <div className="text-center">
+                       <p className="mb-3 text-white/90 font-medium">
+                         {agentMode === 'chat' ? '✨ Ask me anything!' : '🤖 Agent ready to help'}
+                       </p>
+                       <p className="mb-3 text-white/80">
+                         {agentMode === 'chat' ? 'I can analyze your screen and answer questions' : 'I can help you with complex tasks'}
+                       </p>
+                     </div>
+                   </div>
+                 )}
+                 
                  <div ref={messagesEndRef} />
+               </div>
+               
+               {/* Input Area - Fixed at the bottom of the panel */}
+               <div className="border-t border-white/10 p-3 bg-white/[0.02]">
+                 <form onSubmit={handleSubmit} className="relative">
+                   <input
+                     ref={inputRef}
+                     value={prompt}
+                     onChange={(e) => setPrompt(e.target.value)}
+                     placeholder={
+                       isStreaming
+                         ? (agentMode === "chat" ? "Thinking..." : "Processing...")
+                         : agentMode === "agent"
+                         ? "Ask me to help you with complex tasks..."
+                         : "Chat with me or ask about your screen..."
+                     }
+                     disabled={isStreaming && agentMode !== "chat"}
+                     onFocus={() => {
+                       window.ipcRenderer.send('chat:focus');
+                       if (inputRef.current) {
+                         inputRef.current.style.pointerEvents = 'auto';
+                       }
+                     }}
+                     className="glass-input pr-14 app-region-no-drag w-full"
+                   />
+                   <div className="absolute right-4 top-1/2 -translate-y-1/2">
+                     <div className="flex gap-2 items-center">
+                       <div className="flex gap-1 items-center opacity-70">
+                         <span className="text-xs">↵</span>
+                         <span className="text-xs">send</span>
+                         <span className="mx-1">•</span>
+                         <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 3a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3H6a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3V6a3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3h12a3 3 0 0 0 3-3 3 3 0 0 0-3-3z"/></svg>
+                         <span className="text-xs">↵</span>
+                         <span className="text-xs">close</span>
+                       </div>
+                     </div>
+                   </div>
+                 </form>
                </div>
               </div>
             </div>
           )}
             
           {/* Input Area: hide during meeting live mode */}
-            {!isLiveMode && (
+            {!isLiveMode && highlightChatVisible && (
               <div className="glass-chat-input-area">
                 <form onSubmit={handleSubmit} className="relative">
                   <input
                     ref={inputRef}
                     value={prompt}
                     onChange={(e) => setPrompt(e.target.value)}
-                    placeholder={
-                      isStreaming
-                        ? (agentMode === "chat" ? "Thinking..." : "Processing...")
-                        : highlightChatVisible
-                        ? "Ask about the screenshot..."
-                        : isLiveMode
-                        ? "Ask a follow-up..."
-                        : agentMode === "agent"
-                        ? "Ask me to help you with complex tasks..."
-                        : "Chat with me or ask about your screen..."
-                    }
+                    placeholder="Ask about the screenshot..."
                     disabled={isStreaming && agentMode !== "chat"}
                     onFocus={() => {
                       window.ipcRenderer.send('chat:focus');
