@@ -470,8 +470,21 @@ ${seed}`;
             const result = await model.generateContent(prompt);
             console.log('[MeetingChat] Got Gemini response - raw result:', result);
             console.log('[MeetingChat] Response object:', result.response);
-            console.log('[MeetingChat] Response text method result:', result.response.text());
-            const text = result.response.text()?.trim() || 'Could you elaborate on that last point?';
+            
+            let text = '';
+            try {
+              text = result.response?.text?.() || '';
+              console.log('[MeetingChat] Response text method result:', text);
+            } catch (textError) {
+              console.error('[MeetingChat] Error calling text():', textError);
+              // Try alternative access methods
+              if (result.response?.candidates?.[0]?.content?.parts?.[0]?.text) {
+                text = result.response.candidates[0].content.parts[0].text;
+                console.log('[MeetingChat] Got response from candidates structure');
+              }
+            }
+            
+            text = text.trim() || 'Could you elaborate on that last point?';
             console.log('[MeetingChat] Final processed text:', text);
             console.log('[MeetingChat] Text length:', text.length);
             console.log('[MeetingChat] Sending text to frontend...');
