@@ -1934,12 +1934,12 @@ async function performVisualNavigation(appName: string, cursor: ReturnType<typeo
     console.log(`[VisualNav] Ensuring cursor is always visible...`);
     await cursor.show(); // Make sure cursor window is visible and on top
     
-    // Step 2: Move cursor to middle of screen (bit higher as requested)
+    // Step 2: Move cursor to middle of screen (adjust position for better Spotlight opening)
     const display = screen.getPrimaryDisplay();
-    const centerX = Math.floor(display.bounds.width / 2);
-    const centerY = Math.floor(display.bounds.height * 0.4); // Bit higher than center
+    const centerX = Math.floor(display.bounds.width / 2) - 20; // Slightly left
+    const centerY = Math.floor(display.bounds.height * 0.35); // Higher up
     
-    console.log(`[VisualNav] Moving cursor to screen middle-high (${centerX}, ${centerY})`);
+    console.log(`[VisualNav] Moving cursor to adjusted middle (${centerX}, ${centerY}) for better Spotlight opening`);
     await cursor.moveCursor({ x: centerX, y: centerY });
     await new Promise(resolve => setTimeout(resolve, 300));
     
@@ -1993,25 +1993,26 @@ async function performVisualNavigation(appName: string, cursor: ReturnType<typeo
       const screenshot = await takeAndSaveScreenshots("Desktop", timestampFolder);
       
       if (screenshot) {
-        const inputResult = await visionService.analyzeScreenForElement(
-          screenshot,
-          "Spotlight search input field or search box at the top center of the screen"
-        );
-        
-        if (inputResult.found && inputResult.x && inputResult.y) {
-          console.log(`[VisualNav] 👁️ Vision found input field at (${inputResult.x}, ${inputResult.y})`);
-          await cursor.moveCursor({ x: inputResult.x, y: inputResult.y });
-          await new Promise(resolve => setTimeout(resolve, 300));
-          await cursor.performClick({ x: inputResult.x, y: inputResult.y });
-        } else {
-          // Fallback to estimated position if vision fails
-          console.log(`[VisualNav] Vision failed, using fallback position`);
-          const inputX = centerX;
-          const inputY = Math.floor(display.bounds.height * 0.22); // Higher as requested
-          await cursor.moveCursor({ x: inputX, y: inputY });
-          await new Promise(resolve => setTimeout(resolve, 300));
-          await cursor.performClick({ x: inputX, y: inputY });
-        }
+              const inputResult = await visionService.analyzeScreenForElement(
+        screenshot,
+        "Spotlight search input text field - the white rectangular search box at the top center of the screen where you type"
+      );
+      
+      if (inputResult.found && inputResult.x && inputResult.y) {
+        console.log(`[VisualNav] 👁️ Vision found input field at (${inputResult.x}, ${inputResult.y})`);
+        await cursor.moveCursor({ x: inputResult.x, y: inputResult.y });
+        await new Promise(resolve => setTimeout(resolve, 300));
+        await cursor.performClick({ x: inputResult.x, y: inputResult.y });
+      } else {
+        // Improved fallback position - exactly in the center of typical Spotlight input
+        console.log(`[VisualNav] Vision failed, using improved fallback position`);
+        const inputX = Math.floor(display.bounds.width / 2); // Center horizontally
+        const inputY = Math.floor(display.bounds.height * 0.18); // Higher up, typical Spotlight position
+        console.log(`[VisualNav] Clicking fallback input position at (${inputX}, ${inputY})`);
+        await cursor.moveCursor({ x: inputX, y: inputY });
+        await new Promise(resolve => setTimeout(resolve, 300));
+        await cursor.performClick({ x: inputX, y: inputY });
+      }
       }
       
       // Step 5: Wait a second, then type the app name
@@ -2027,25 +2028,26 @@ async function performVisualNavigation(appName: string, cursor: ReturnType<typeo
       const screenshot2 = await takeAndSaveScreenshots("Desktop", timestampFolder);
       
       if (screenshot2) {
-        const appResult = await visionService.analyzeScreenForElement(
-          screenshot2,
-          `${appName} app icon or result in the Spotlight search results list`
-        );
-        
-        if (appResult.found && appResult.x && appResult.y) {
-          console.log(`[VisualNav] 👁️ Vision found ${appName} at (${appResult.x}, ${appResult.y})`);
-          await cursor.moveCursor({ x: appResult.x, y: appResult.y });
-          await new Promise(resolve => setTimeout(resolve, 300));
-          await cursor.performClick({ x: appResult.x, y: appResult.y });
-        } else {
-          // Fallback to estimated first result position
-          console.log(`[VisualNav] Vision failed, clicking estimated first result`);
-          const resultX = centerX;
-          const resultY = Math.floor(display.bounds.height * 0.32);
-          await cursor.moveCursor({ x: resultX, y: resultY });
-          await new Promise(resolve => setTimeout(resolve, 300));
-          await cursor.performClick({ x: resultX, y: resultY });
-        }
+              const appResult = await visionService.analyzeScreenForElement(
+        screenshot2,
+        `${appName} application icon or result item in the Spotlight search results list - look for the app name and icon`
+      );
+      
+      if (appResult.found && appResult.x && appResult.y) {
+        console.log(`[VisualNav] 👁️ Vision found ${appName} at (${appResult.x}, ${appResult.y})`);
+        await cursor.moveCursor({ x: appResult.x, y: appResult.y });
+        await new Promise(resolve => setTimeout(resolve, 300));
+        await cursor.performClick({ x: appResult.x, y: appResult.y });
+      } else {
+        // Improved fallback to first result position
+        console.log(`[VisualNav] Vision failed, clicking improved first result position`);
+        const resultX = Math.floor(display.bounds.width / 2); // Center horizontally
+        const resultY = Math.floor(display.bounds.height * 0.28); // Better positioned for first result
+        console.log(`[VisualNav] Clicking fallback result position at (${resultX}, ${resultY})`);
+        await cursor.moveCursor({ x: resultX, y: resultY });
+        await new Promise(resolve => setTimeout(resolve, 300));
+        await cursor.performClick({ x: resultX, y: resultY });
+      }
       }
     } catch (screenshotError) {
       console.error(`[VisualNav] Screenshot failed:`, screenshotError);
@@ -2056,11 +2058,11 @@ async function performVisualNavigation(appName: string, cursor: ReturnType<typeo
     // Step 5: Verify the app opened successfully
     let opened = false;
     for (let i = 0; i < 6; i++) {
-      if (await isAppFrontmost(appName) || await isAppVisible(appName)) {
+              if (await isAppFrontmost(appName) || await isAppVisible(appName)) {
         console.log(`[VisualNav] ✅ ${appName} opened successfully via Spotlight!`);
         opened = true;
-        break;
-      }
+                break;
+              }
       console.log(`[VisualNav] Waiting for ${appName} to fully load... (${i + 1}/6)`);
       await new Promise(r => setTimeout(r, 500));
     }
@@ -2071,7 +2073,7 @@ async function performVisualNavigation(appName: string, cursor: ReturnType<typeo
         message: `${appName} opened successfully via Spotlight search!`,
       });
       return;
-    } else {
+        } else {
       console.log(`[VisualNav] ⚠️ ${appName} may have opened but not detected as frontmost`);
       // Continue to fallback methods
     }
@@ -2086,13 +2088,13 @@ async function performVisualNavigation(appName: string, cursor: ReturnType<typeo
   const directDockClicked = await clickDockItemIfAvailable(appName, cursor);
   if (directDockClicked) {
     // Verify app opened
-    for (let i = 0; i < 5; i++) {
-      if (await isAppFrontmost(appName) || await isAppVisible(appName)) {
+        for (let i = 0; i < 5; i++) {
+          if (await isAppFrontmost(appName) || await isAppVisible(appName)) {
         console.log(`[VisualNav] ${appName} opened via fallback Dock click!`);
         return;
-      }
-      await new Promise(r => setTimeout(r, 300));
-    }
+          }
+          await new Promise(r => setTimeout(r, 300));
+        }
   }
 
   // Final fallback: Native app opening if both Spotlight and Dock fail
@@ -2105,8 +2107,8 @@ async function performVisualNavigation(appName: string, cursor: ReturnType<typeo
     for (let i = 0; i < 5; i++) {
       if (await isAppFrontmost(appName) || await isAppVisible(appName)) {
         console.log(`[VisualNav] ✅ ${appName} opened successfully via native fallback!`);
-        event.sender.send("reply", {
-          type: "success",
+    event.sender.send("reply", {
+      type: "success",
           message: `${appName} opened successfully!`,
         });
         return;
@@ -2119,12 +2121,12 @@ async function performVisualNavigation(appName: string, cursor: ReturnType<typeo
       type: "error",
       message: `Could not open ${appName}. Please ensure the app is installed.`,
     });
-  } catch (nativeErr) {
+    } catch (nativeErr) {
     console.error(`[VisualNav] Native fallback failed:`, nativeErr);
-    event.sender.send("reply", {
-      type: "error",
+      event.sender.send("reply", {
+        type: "error",
       message: `Could not open ${appName}. Please ensure the app is installed.`,
-    });
+      });
   }
 
   console.log(`[VisualNav] 🎯 Spotlight-based navigation session ended`);
