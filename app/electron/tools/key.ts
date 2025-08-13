@@ -79,9 +79,11 @@ end tell`;
 
 export default async function key(
   body: string,
-  bundleId: string
+  bundleId: string,
+  options?: { noAppleScriptFallback?: boolean }
 ): Promise<KeyReturnType> {
   const keyString = body;
+  const noApple = options?.noAppleScriptFallback || process.env.OPUS_COLLAB_MODE === '1';
   
   // Use spawn instead of exec to avoid shell escaping issues
   return new Promise((resolve, reject) => {
@@ -105,6 +107,10 @@ export default async function key(
         logWithElapsed("performAction", `Executed key: ${keyString}`);
         resolve({ type: "key", keyString });
       } else {
+        if (noApple) {
+          reject(new Error(`Key execution failed with code ${code}: ${stderr}`));
+          return;
+        }
         // AppleScript fallback for collaborative reliability
         try {
           const script = buildAppleScriptFromKeyString(keyString);
@@ -120,6 +126,10 @@ export default async function key(
     });
     
     child.on('error', async (error) => {
+      if (noApple) {
+        reject(error);
+        return;
+      }
       // AppleScript fallback if spawn fails
       try {
         const script = buildAppleScriptFromKeyString(keyString);

@@ -190,7 +190,7 @@ export async function performAction(
       // Type text via Swift key tool in collab mode (no AppleScript)
       case "=TypeText": {
         const text = body ?? '';
-        const res = await key(text, bundleId);
+        const res = await key(text, bundleId, { noAppleScriptFallback: true });
         event.sender.send("reply", { type: "action", message: `Typed text (${text.length} chars)` });
         return res as any;
       }
