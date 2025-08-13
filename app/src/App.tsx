@@ -1057,14 +1057,17 @@ function App() {
 
           {/* 3-dots menu */}
           <div
-            className="relative"
+            className="relative app-region-no-drag pointer-events-auto"
+            style={{ pointerEvents: 'auto', zIndex: 100 }}
             onMouseEnter={() => {
+              console.log('[Menu Container] Mouse entered');
               if (menuCloseTimerRef.current) {
                 clearTimeout(menuCloseTimerRef.current as any);
                 menuCloseTimerRef.current = null;
               }
             }}
             onMouseLeave={() => {
+              console.log('[Menu Container] Mouse left');
               if (menuCloseTimerRef.current) {
                 clearTimeout(menuCloseTimerRef.current as any);
               }
