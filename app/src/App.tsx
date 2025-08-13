@@ -64,6 +64,11 @@ function App() {
   // Menu dropdown state
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const menuCloseTimerRef = useRef<NodeJS.Timeout | null>(null);
+  
+  // Debug menu state changes
+  useEffect(() => {
+    console.log('[Menu State Changed] isMenuOpen:', isMenuOpen);
+  }, [isMenuOpen]);
 
   // Remove all the complex hover stuff - just keep it simple
 
@@ -833,7 +838,7 @@ function App() {
   return (
     <div className="w-full h-full flex flex-col items-center justify-start gap-1 pt-2 bg-transparent pointer-events-none">
       {/* Clonely-style Mainbar */}
-      <div id="mainbar" className="glass mainbar-glass liquid-frost rounded-full font-sans flex-none w-[30vw] h-[6vh] max-w-[30vw] max-h-[6vh] px-3 pointer-events-auto app-region-drag">
+      <div id="mainbar" className="glass mainbar-glass liquid-frost rounded-full font-sans flex-none w-[30vw] h-[6vh] max-w-[30vw] max-h-[6vh] px-3 pointer-events-auto app-region-drag" style={{ overflow: 'visible' }}>
         {/* Draggable areas on the sides */}
         <div className="absolute left-0 top-0 w-8 h-full app-region-drag pointer-events-auto"></div>
         <div className="absolute right-0 top-0 w-8 h-full app-region-drag pointer-events-auto"></div>
@@ -1098,10 +1103,17 @@ function App() {
             </button>
 
             {/* Dropdown menu */}
+            {console.log('[Menu Dropdown] isMenuOpen:', isMenuOpen) && false}
             {isMenuOpen && (
               <div 
-                className="absolute right-0 top-[calc(100%+12px)] w-28 rounded-md z-[9999] glass liquid-panel shadow-xl"
-                style={{ position: 'absolute' }}
+                className="absolute right-0 top-[calc(100%+12px)] w-28 rounded-md z-[9999] glass liquid-panel shadow-xl pointer-events-auto"
+                style={{ 
+                  position: 'absolute',
+                  pointerEvents: 'auto',
+                  zIndex: 99999,
+                  backgroundColor: 'rgba(20, 20, 40, 0.95)',
+                  border: '1px solid rgba(100, 100, 255, 0.3)'
+                }}
               >
                 {/* Hide option */}
                 <button
