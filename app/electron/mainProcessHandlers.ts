@@ -10,6 +10,7 @@ import { execPromise, logWithElapsed } from "./utils/utils";
 import { performAction } from "./performAction";
 import { getVirtualCursor } from "./performAction";
 import runAppleScript from "./tools/appleScript";
+import { SwiftMouse } from "./tools/swiftMouse";
 import { AgentInputItem } from "@openai/agents";
 import { Element } from "./types";
 import { ConversationMonitor } from "./ai/conversationMonitor";
