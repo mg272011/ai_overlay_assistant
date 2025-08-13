@@ -1960,59 +1960,59 @@ async function performVisualNavigation(appName: string, cursor: ReturnType<typeo
       const screenshot = await takeAndSaveScreenshots("Desktop", timestampFolder);
       
       if (screenshot) {
-      
-      const inputResult = await visionService.analyzeScreenForElement(
-        screenshot,
-        "Spotlight search input field or search box at the top center of the screen"
-      );
-      
-      if (inputResult.found && inputResult.x && inputResult.y) {
-        console.log(`[VisualNav] 👁️ Vision found input field at (${inputResult.x}, ${inputResult.y})`);
-        await cursor.moveCursor({ x: inputResult.x, y: inputResult.y });
-        await new Promise(resolve => setTimeout(resolve, 300));
-        await cursor.performClick({ x: inputResult.x, y: inputResult.y });
-      } else {
-        // Fallback to estimated position if vision fails
-        console.log(`[VisualNav] Vision failed, using fallback position`);
-        const inputX = centerX;
-        const inputY = Math.floor(display.bounds.height * 0.22); // Higher as requested
-        await cursor.moveCursor({ x: inputX, y: inputY });
-        await new Promise(resolve => setTimeout(resolve, 300));
-        await cursor.performClick({ x: inputX, y: inputY });
+        const inputResult = await visionService.analyzeScreenForElement(
+          screenshot,
+          "Spotlight search input field or search box at the top center of the screen"
+        );
+        
+        if (inputResult.found && inputResult.x && inputResult.y) {
+          console.log(`[VisualNav] 👁️ Vision found input field at (${inputResult.x}, ${inputResult.y})`);
+          await cursor.moveCursor({ x: inputResult.x, y: inputResult.y });
+          await new Promise(resolve => setTimeout(resolve, 300));
+          await cursor.performClick({ x: inputResult.x, y: inputResult.y });
+        } else {
+          // Fallback to estimated position if vision fails
+          console.log(`[VisualNav] Vision failed, using fallback position`);
+          const inputX = centerX;
+          const inputY = Math.floor(display.bounds.height * 0.22); // Higher as requested
+          await cursor.moveCursor({ x: inputX, y: inputY });
+          await new Promise(resolve => setTimeout(resolve, 300));
+          await cursor.performClick({ x: inputX, y: inputY });
+        }
       }
-    }
-    
-    // Step 5: Wait a second, then type the app name
-    await new Promise(resolve => setTimeout(resolve, 1000)); // Wait as requested
-    console.log(`[VisualNav] Typing "${appName}" into Spotlight...`);
-    await runAppleScript(`tell application "System Events" to keystroke "${appName}"`);
-    
-    // Step 6: Wait a second for search results
-    await new Promise(resolve => setTimeout(resolve, 1000)); // Wait as requested
-    
-    // Step 7: Use vision to find and click the app
-    console.log(`[VisualNav] 👁️ Using vision to find ${appName} in search results...`);
-    const screenshot2 = await takeAndSaveScreenshots("Desktop", timestampFolder);
-    
-    if (screenshot2) {
-      const appResult = await visionService.analyzeScreenForElement(
-        screenshot2,
-        `${appName} app icon or result in the Spotlight search results list`
-      );
       
-      if (appResult.found && appResult.x && appResult.y) {
-        console.log(`[VisualNav] 👁️ Vision found ${appName} at (${appResult.x}, ${appResult.y})`);
-        await cursor.moveCursor({ x: appResult.x, y: appResult.y });
-        await new Promise(resolve => setTimeout(resolve, 300));
-        await cursor.performClick({ x: appResult.x, y: appResult.y });
-      } else {
-        // Fallback to estimated first result position
-        console.log(`[VisualNav] Vision failed, clicking estimated first result`);
-        const resultX = centerX;
-        const resultY = Math.floor(display.bounds.height * 0.32);
-        await cursor.moveCursor({ x: resultX, y: resultY });
-        await new Promise(resolve => setTimeout(resolve, 300));
-        await cursor.performClick({ x: resultX, y: resultY });
+      // Step 5: Wait a second, then type the app name
+      await new Promise(resolve => setTimeout(resolve, 1000)); // Wait as requested
+      console.log(`[VisualNav] Typing "${appName}" into Spotlight...`);
+      await runAppleScript(`tell application "System Events" to keystroke "${appName}"`);
+      
+      // Step 6: Wait a second for search results
+      await new Promise(resolve => setTimeout(resolve, 1000)); // Wait as requested
+      
+      // Step 7: Use vision to find and click the app
+      console.log(`[VisualNav] 👁️ Using vision to find ${appName} in search results...`);
+      const screenshot2 = await takeAndSaveScreenshots("Desktop", timestampFolder);
+      
+      if (screenshot2) {
+        const appResult = await visionService.analyzeScreenForElement(
+          screenshot2,
+          `${appName} app icon or result in the Spotlight search results list`
+        );
+        
+        if (appResult.found && appResult.x && appResult.y) {
+          console.log(`[VisualNav] 👁️ Vision found ${appName} at (${appResult.x}, ${appResult.y})`);
+          await cursor.moveCursor({ x: appResult.x, y: appResult.y });
+          await new Promise(resolve => setTimeout(resolve, 300));
+          await cursor.performClick({ x: appResult.x, y: appResult.y });
+        } else {
+          // Fallback to estimated first result position
+          console.log(`[VisualNav] Vision failed, clicking estimated first result`);
+          const resultX = centerX;
+          const resultY = Math.floor(display.bounds.height * 0.32);
+          await cursor.moveCursor({ x: resultX, y: resultY });
+          await new Promise(resolve => setTimeout(resolve, 300));
+          await cursor.performClick({ x: resultX, y: resultY });
+        }
       }
     } catch (screenshotError) {
       console.error(`[VisualNav] Screenshot failed:`, screenshotError);
