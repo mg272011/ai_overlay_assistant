@@ -609,8 +609,9 @@ Provide a helpful response with key information about the topic.`;
               console.error('[MeetingChat] 🔍 ❌ Full result object for debugging:', JSON.stringify(result, null, 2));
               
               // Try to extract from candidates structure as fallback
-              if (result?.candidates?.[0]?.content?.parts?.[0]?.text) {
-                const fallbackResponse = result.candidates[0].content.parts[0].text;
+              const resultAny = result as any;
+              if (resultAny?.candidates?.[0]?.content?.parts?.[0]?.text) {
+                const fallbackResponse = resultAny.candidates[0].content.parts[0].text;
                 console.log('[MeetingChat] 🔍 Using fallback response from candidates:', fallbackResponse);
                 send('text', fallbackResponse);
                 send('stream_end');
