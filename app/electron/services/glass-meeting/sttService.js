@@ -106,7 +106,7 @@ class GlassSttService {
                 if (isFinal) {
                     transcript = await this.correctIfObvious(transcript);
                 }
-                console.log(`[Glass-Meeting] 🎤 Me: ${transcript} (${isFinal ? 'final' : 'partial'})`);
+                console.log(`[Glass-Meeting] 🎤 Me (FROM MIC AUDIO): ${transcript} (${isFinal ? 'final' : 'partial'})`);
                 this.sendToRenderer('stt-update', {
                     speaker: 'Me',
                     text: transcript,
