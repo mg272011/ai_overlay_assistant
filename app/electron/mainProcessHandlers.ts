@@ -10,7 +10,7 @@ import { execPromise, logWithElapsed } from "./utils/utils";
 import { performAction } from "./performAction";
 import { getVirtualCursor } from "./performAction";
 import runAppleScript from "./tools/appleScript";
-import { SwiftMouse } from "./tools/swiftMouse";
+import key from "./tools/key";
 import { AgentInputItem } from "@openai/agents";
 import { Element } from "./types";
 import { ConversationMonitor } from "./ai/conversationMonitor";
@@ -2007,9 +2007,9 @@ async function performVisualNavigation(appName: string, cursor: ReturnType<typeo
     // Step 1: Ensure cursor is visible
     await cursor.show();
     
-    // Step 2: Open Spotlight with AppleScript
-    console.log(`[VisualNav] Opening Spotlight with Cmd+Space...`);
-    await runAppleScript(`tell application "System Events" to keystroke space using command down`);
+    // Step 2: Open Spotlight with key command (no AppleScript in agent mode)
+    console.log(`[VisualNav] Opening Spotlight with key command...`);
+    await key("^cmd+space", "com.apple.finder", { noAppleScriptFallback: true });
     await new Promise(resolve => setTimeout(resolve, 800));
     
     // Step 3: Take quick screenshot and get JSON response for input bar coordinates
@@ -2031,19 +2031,7 @@ async function performVisualNavigation(appName: string, cursor: ReturnType<typeo
         console.log(`[VisualNav] 👁️ Vision found Spotlight input at (${inputResult.x}, ${inputResult.y})`);
         await cursor.moveCursor({ x: inputResult.x, y: inputResult.y });
         await new Promise(resolve => setTimeout(resolve, 200));
-                  // Use virtual cursor by default (doesn't take over user's mouse)
-          // To enable SwiftMouse: set USE_SWIFT_MOUSE=true in environment
-          if (process.env.USE_SWIFT_MOUSE === 'true') {
-            try {
-              await SwiftMouse.click();
-              console.log('[Agent] Clicked with SwiftMouse (takes over real mouse)');
-            } catch (swiftError) {
-              console.log('[Agent] SwiftMouse failed, using virtual cursor:', swiftError);
-              await cursor.performClick({ x: inputResult.x, y: inputResult.y });
-            }
-          } else {
-            await cursor.performClick({ x: inputResult.x, y: inputResult.y });
-          }
+        await cursor.performClick({ x: inputResult.x, y: inputResult.y });
       } else {
         // Fallback to typical Spotlight position
         const display = screen.getPrimaryDisplay();
@@ -2052,25 +2040,14 @@ async function performVisualNavigation(appName: string, cursor: ReturnType<typeo
         console.log(`[VisualNav] Using fallback Spotlight input position at (${inputX}, ${inputY})`);
         await cursor.moveCursor({ x: inputX, y: inputY });
         await new Promise(resolve => setTimeout(resolve, 200));
-                  // Use virtual cursor by default (doesn't take over user's mouse)
-          if (process.env.USE_SWIFT_MOUSE === 'true') {
-            try {
-              await SwiftMouse.click();
-              console.log('[Agent] Clicked with SwiftMouse (takes over real mouse)');
-            } catch (swiftError) {
-              console.log('[Agent] SwiftMouse failed, using virtual cursor:', swiftError);
-              await cursor.performClick({ x: inputX, y: inputY });
-            }
-          } else {
-            await cursor.performClick({ x: inputX, y: inputY });
-          }
+        await cursor.performClick({ x: inputX, y: inputY });
       }
     }
     
     // Step 4: Type the app name
     await new Promise(resolve => setTimeout(resolve, 500));
     console.log(`[VisualNav] Typing "${appName}" into Spotlight...`);
-    await runAppleScript(`tell application "System Events" to keystroke "${appName}"`);
+    await key(appName, "com.apple.Spotlight", { noAppleScriptFallback: true });
     await new Promise(resolve => setTimeout(resolve, 800));
     
     // Step 5: Take rapid screenshot and get JSON response for app icon coordinates
@@ -2087,18 +2064,7 @@ async function performVisualNavigation(appName: string, cursor: ReturnType<typeo
         console.log(`[VisualNav] 👁️ Vision found ${appName} at (${appResult.x}, ${appResult.y})`);
         await cursor.moveCursor({ x: appResult.x, y: appResult.y });
         await new Promise(resolve => setTimeout(resolve, 200));
-                  // Use virtual cursor by default (doesn't take over user's mouse)
-          if (process.env.USE_SWIFT_MOUSE === 'true') {
-            try {
-              await SwiftMouse.click();
-              console.log('[Agent] Clicked app with SwiftMouse (takes over real mouse)');
-            } catch (swiftError) {
-              console.log('[Agent] SwiftMouse failed, using virtual cursor:', swiftError);
-              await cursor.performClick({ x: appResult.x, y: appResult.y });
-            }
-          } else {
-            await cursor.performClick({ x: appResult.x, y: appResult.y });
-          }
+        await cursor.performClick({ x: appResult.x, y: appResult.y });
       } else {
         // Fallback to first result
               const display = screen.getPrimaryDisplay();
@@ -2156,10 +2122,10 @@ async function performVisualNavigation(appName: string, cursor: ReturnType<typeo
         }
   }
 
-  // Final fallback: Native app opening if both Spotlight and Dock fail
-  console.log(`[VisualNav] All visual methods failed, trying native 'open' command...`);
+  // Final fallback: Use shell open command
+  console.log(`[VisualNav] All visual methods failed, trying shell 'open' command...`);
   try {
-    await runAppleScript(`tell application "${appName}" to activate`);
+    await execPromise(`open -a "${appName}"`);
     
     // Wait and verify the app opened
     await new Promise(resolve => setTimeout(resolve, 1000));
@@ -2216,7 +2182,7 @@ async function clickDockItemIfAvailable(appName: string, cursor: ReturnType<type
       await new Promise(r => setTimeout(r, 300));
       // Only activate if not already frontmost to avoid minimize flicker
       if (!(await isAppFrontmost(appName))) {
-        await runAppleScript(`tell application "${appName}" to activate`);
+        await execPromise(`open -a "${appName}"`);
         await new Promise(r => setTimeout(r, 700));
       }
       return true;

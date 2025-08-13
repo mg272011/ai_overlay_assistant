@@ -8,9 +8,9 @@ class GlassSummaryService {
         this.callbacks = {};
         this.analysisCounter = 0;
         this.lastAnalysisTimestamp = 0;
-        this.MIN_ANALYSIS_INTERVAL = 10000; // 10 seconds between analyses for fresh questions
+        this.MIN_ANALYSIS_INTERVAL = 3000; // 3 seconds between analyses for fresh questions (faster)
         this.lastQuestionRefreshTimestamp = 0;
-        this.QUESTION_REFRESH_INTERVAL = 15000; // Refresh "what should I say next" every 15 seconds
+        this.QUESTION_REFRESH_INTERVAL = 5000; // Refresh "what should I say next" every 5 seconds (faster)
 
         // Initialize OpenAI client directly
         const apiKey = process.env.OPENAI_API_KEY;

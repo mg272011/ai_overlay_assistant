@@ -185,66 +185,53 @@ export class VirtualCursorWindow {
       Math.pow(targetX - startX, 2) + Math.pow(targetY - startY, 2)
     );
     
-    // Duration based on distance (min 200ms, max 1000ms)
-    const duration = Math.min(1000, Math.max(200, distance * 1.5));
-    const steps = Math.max(Math.floor(duration / 16), 10); // ~60fps
+    // Duration based on distance (min 0.2s, max 0.8s)
+    const durationSeconds = Math.min(0.8, Math.max(0.2, distance / 1000));
     
-    console.log(`[VirtualCursorWindow] Animation: distance=${distance}, duration=${duration}, steps=${steps}`);
+    console.log(`[VirtualCursorWindow] Animation: distance=${distance}, duration=${durationSeconds}s`);
     
     try {
-      for (let i = 0; i <= steps; i++) {
-        if (!this.window || this.window.isDestroyed()) {
-          console.log('[VirtualCursorWindow] Window destroyed during animation, stopping');
-          return;
-        }
-        
-        const progress = i / steps;
-        // Use easing function for natural movement
-        const easedProgress = this.easeInOutCubic(progress);
-        
-        const currentX = startX + (targetX - startX) * easedProgress;
-        const currentY = startY + (targetY - startY) * easedProgress;
-        
-        // Remove randomness for precise movement
-        const jitterX = 0;
-        const jitterY = 0;
-        
-        this.currentPosition = {
-          x: Math.round(currentX + jitterX),
-          y: Math.round(currentY + jitterY),
-          isDragging: targetPosition.isDragging
-        };
-        
-        // Wait for webContents to be ready
-        try {
-          if (this.window.webContents.isLoading()) {
-            console.log('[VirtualCursorWindow] WebContents still loading, waiting...');
-            await new Promise(resolve => {
-              this.window!.webContents.once('did-finish-load', resolve);
-            });
-          }
-          
-          console.log(`[VirtualCursorWindow] Sending position update: (${this.currentPosition.x}, ${this.currentPosition.y})`);
-          this.window.webContents.send("update-cursor-position", this.currentPosition);
-        } catch (sendError) {
-          console.error(`[VirtualCursorWindow] Error sending position update:`, sendError);
-        }
-        
-        // Wait for next frame
-        await new Promise(resolve => setTimeout(resolve, 16));
-      }
+      // Use the new Swift smooth movement tool for accurate, smooth cursor movement
+      const swiftScriptPath = path.join(app.getAppPath(), "swift", "smoothMove.swift");
       
-      // Ensure we end at exact target position
+      // Update visual cursor position immediately
       this.currentPosition = targetPosition;
-      console.log(`[VirtualCursorWindow] Final position: (${this.currentPosition.x}, ${this.currentPosition.y})`);
       
-      try {
-        this.window.webContents.send("update-cursor-position", this.currentPosition);
-      } catch (sendError) {
-        console.error(`[VirtualCursorWindow] Error sending final position:`, sendError);
+      // Execute smooth movement with Swift (handles coordinate scaling internally)
+      const { stdout, stderr } = await execPromise(
+        `swift ${swiftScriptPath} ${targetX} ${targetY} ${durationSeconds} easeInOut`
+      );
+      
+      if (stdout) {
+        try {
+          const result = JSON.parse(stdout.trim());
+          console.log(`[VirtualCursorWindow] Smooth move result:`, result);
+        } catch (e) {
+          console.log(`[VirtualCursorWindow] Swift output:`, stdout.trim());
+        }
       }
+      if (stderr) {
+        console.error(`[VirtualCursorWindow] Smooth move stderr:`, stderr.trim());
+      }
+      
+      // Update the visual cursor to match
+      if (this.window && !this.window.isDestroyed()) {
+        this.window.webContents.send("update-cursor-position", this.currentPosition);
+        
+        // Ensure cursor stays on top
+        this.window.setAlwaysOnTop(true, 'screen-saver');
+        this.window.focus();
+      }
+      
+      console.log(`[VirtualCursorWindow] Final position: (${this.currentPosition.x}, ${this.currentPosition.y})`);
     } catch (error) {
       console.error('[VirtualCursorWindow] Error in smoothMoveTo animation:', error);
+      
+      // Fallback to instant positioning
+      this.currentPosition = targetPosition;
+      if (this.window && !this.window.isDestroyed()) {
+        this.window.webContents.send("update-cursor-position", this.currentPosition);
+      }
     }
   }
   
