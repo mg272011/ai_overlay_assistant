@@ -1011,32 +1011,11 @@ User: ${userPrompt}`;
     // to prevent conflicts and mouse blocking issues
     
     // SILENT PRE-ASSESSMENT for agent mode (collaborative mode)
-    let preAssessment = null;
-    // Heuristic: simple open-only prompt (no chained actions)
-    const isOpenOnlyPrompt = /^(\s*)?(open|launch|start)\s+[^\s].*$/i.test(userPrompt) &&
-      !/(\band\b|\bthen\b|\bto\b|\bfor\b|\bwith\b|\bgo to\b|\bmake\b|\bcreate\b|\bcompose\b|\bbook\b|\babout\b|\bon\b|\bin\b)/i.test(userPrompt);
-    if (isAgentMode && !isOpenOnlyPrompt) {
-      try {
-        console.log(`[MainHandlers] 🔍 Running silent pre-assessment for: "${userPrompt}"`);
-        // Take a quick screenshot for assessment
-        const logFolder = createLogFolder('pre-assessment');
-        const timestampFolder = path.join(logFolder, `${Date.now()}`);
-        if (!fs.existsSync(timestampFolder)) {
-          fs.mkdirSync(timestampFolder, { recursive: true });
-        }
-        const screenshotBase64 = await takeAndSaveScreenshots("Desktop", timestampFolder);
-        if (screenshotBase64) {
-          preAssessment = await geminiVision.silentScreenAssessment(screenshotBase64, userPrompt);
-          console.log(`[MainHandlers] 🔍 Assessment complete:`, {
-            currentApps: preAssessment.currentApps,
-            needsNavigation: preAssessment.needsNavigation,
-            targetApp: preAssessment.targetApp,
-            context: preAssessment.context
-          });
-        }
-      } catch (assessmentError) {
-        console.warn(`[MainHandlers] Pre-assessment failed, continuing normally:`, assessmentError);
-      }
+    let preAssessment: any = null;
+    const isOpenOnlyPrompt = false; // Skip this check for speed
+    // Skip pre-assessment for speed - agent will figure it out
+    if (isAgentMode) {
+      console.log(`[MainHandlers] 🚀 Fast mode: Skipping pre-assessment, agent will handle navigation`);
     }
     
     const history: AgentInputItem[] = [];
@@ -1044,8 +1023,12 @@ User: ${userPrompt}`;
     let isOpenCommand = false;
     
     try {
-      // In chat mode, skip app detection entirely and go straight to conversational analysis
-      if (isChatMode) {
+      // Fast path for agent mode - skip slow app detection
+      if (isAgentMode) {
+        console.log(`[MainHandlers] 🚀 Agent mode: Fast path - agent will handle app navigation`);
+        appName = "Desktop"; // Agent will handle everything
+        isOpenCommand = false;
+      } else if (isChatMode) {
         console.log(`[MainHandlers] 💬 Chat mode: Skipping app detection, going to conversational analysis`);
         appName = "NONE"; // Don't try to detect any app in chat mode
         isOpenCommand = false;
@@ -1222,9 +1205,9 @@ User: ${userPrompt}`;
             const screenshotBase64 = await takeAndSaveScreenshots("Desktop", stepFolder);
             console.log('[MainHandlers] Screenshot captured for current app work, base64 length:', screenshotBase64?.length || 0);
             
-            // Get clickable elements for the target app (requires bundle id)
+            // Skip clickable elements in agent mode for speed
             let clickableElements: Element[] = [];
-            if (bundleIdForMainApp) {
+            if (!isAgentMode && bundleIdForMainApp) {
               try {
                 const result = await getClickableElements(bundleIdForMainApp, stepFolder);
                 clickableElements = result.clickableElements;
@@ -1232,6 +1215,8 @@ User: ${userPrompt}`;
               } catch (error) {
                 console.warn(`[MainHandlers] Could not get clickable elements for ${mainApp}:`, error);
               }
+            } else if (isAgentMode) {
+              console.log(`[MainHandlers] 🚀 Agent mode: Skipping clickable elements for speed`);
             }
             
             // Use the action agent with full context
