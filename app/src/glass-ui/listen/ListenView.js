@@ -48,6 +48,52 @@ export class ListenView extends LitElement {
       display: none; /* Remove shadow pseudo-element */
     }
 
+    .response-overlay {
+      position: absolute;
+      top: 50px;
+      left: 10px;
+      right: 10px;
+      background: linear-gradient(135deg, rgba(20, 20, 40, 0.95) 0%, rgba(10, 10, 30, 0.95) 100%);
+      border: 1px solid rgba(100, 100, 255, 0.3);
+      border-radius: 8px;
+      padding: 12px 16px;
+      color: rgba(255, 255, 255, 0.95);
+      font-size: 13px;
+      line-height: 1.5;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3), 
+                  0 2px 4px rgba(100, 100, 255, 0.1) inset;
+      backdrop-filter: blur(10px);
+      z-index: 100;
+      animation: slideDown 0.3s ease-out;
+      max-height: 200px;
+      overflow-y: auto;
+    }
+
+    .response-overlay::-webkit-scrollbar {
+      width: 6px;
+    }
+
+    .response-overlay::-webkit-scrollbar-track {
+      background: rgba(0, 0, 0, 0.2);
+      border-radius: 3px;
+    }
+
+    .response-overlay::-webkit-scrollbar-thumb {
+      background: rgba(100, 100, 255, 0.4);
+      border-radius: 3px;
+    }
+
+    @keyframes slideDown {
+      from {
+        opacity: 0;
+        transform: translateY(-10px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
     .top-bar {
       background: linear-gradient(180deg, rgba(255,255,255,0.10), rgba(255,255,255,0.04));
       display: flex;
@@ -173,6 +219,8 @@ export class ListenView extends LitElement {
     captureStartTime: { type: Number },
     isSessionActive: { type: Boolean },
     hasCompletedRecording: { type: Boolean },
+    meetingResponse: { type: String },
+    showResponse: { type: Boolean },
   };
 
   constructor() {
@@ -189,6 +237,9 @@ export class ListenView extends LitElement {
     this.isThrottled = false;
     this.copyState = 'idle';
     this.copyTimeout = null;
+    this.meetingResponse = '';
+    this.showResponse = false;
+    this.responseTimeout = null;
 
     this.adjustWindowHeight = this.adjustWindowHeight.bind(this);
   }
@@ -345,6 +396,11 @@ export class ListenView extends LitElement {
       return;
     }
     
+    // Reset for new response
+    this.meetingResponse = '';
+    this.showResponse = true;
+    this.requestUpdate();
+    
     // Listen for meeting chat stream events
     const handleMeetingChatStream = (data) => {
       console.log('[ListenView] 🎧 ===== RECEIVED MEETING CHAT STREAM =====');
@@ -360,12 +416,20 @@ export class ListenView extends LitElement {
         
         if (data.type === 'text') {
           console.log('[ListenView] 🎧 📝 Received text chunk:', data.content);
-          // Show the response in the UI (you can customize this)
+          // Accumulate chunks
           this.showMeetingResponse(data.content);
         } else if (data.type === 'stream_end') {
           console.log('[ListenView] 🎧 🏁 Stream ended');
           // Clean up the listener
           window.electronAPI.removeListener('meeting-chat-stream', handleMeetingChatStream);
+          
+          // Hide response after 10 seconds
+          if (this.responseTimeout) clearTimeout(this.responseTimeout);
+          this.responseTimeout = setTimeout(() => {
+            this.showResponse = false;
+            this.meetingResponse = '';
+            this.requestUpdate();
+          }, 10000);
         }
       } else {
         console.log('[ListenView] 🎧 ⚠️ Chat ID mismatch, ignoring');
@@ -379,9 +443,12 @@ export class ListenView extends LitElement {
   
   // Show meeting response in UI
   showMeetingResponse(content) {
-    console.log('[ListenView] 📱 Showing meeting response:', content);
-    // For now, just log it - you can integrate with your UI components
-    // This could update a response area, show a notification, etc.
+    console.log('[ListenView] 📱 Showing meeting response chunk:', content);
+    // Accumulate the chunks
+    this.meetingResponse += content;
+    this.showResponse = true;
+    this.requestUpdate();
+    console.log('[ListenView] 📱 Total response so far:', this.meetingResponse);
   }
 
   updated(changedProps) { super.updated(changedProps); if (changedProps.has('viewMode')) this.adjustWindowHeight(); }
@@ -408,6 +475,11 @@ export class ListenView extends LitElement {
             </button>
           </div>
         </div>
+        ${this.showResponse && this.meetingResponse ? html`
+          <div class="response-overlay">
+            ${this.meetingResponse}
+          </div>
+        ` : ''}
         <stt-view .isVisible=${this.viewMode === 'transcript'} @stt-messages-updated=${this.handleSttMessagesUpdated}></stt-view>
         <summary-view .isVisible=${this.viewMode === 'insights'} .hasCompletedRecording=${this.hasCompletedRecording}></summary-view>
       </div>`;
