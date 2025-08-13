@@ -108,7 +108,7 @@ function createWindow() {
         console.log('[LiquidGlass] ✅ Native liquid glass effect applied successfully!');
       } catch (error) {
         console.error('[LiquidGlass] ❌ Failed to apply liquid glass effect:', error);
-        console.log('[LiquidGlass] Falling back to CSS-based glass effects');
+        console.log('[LiquidGlass] Falling back to CSS backdrop-filter effects');
       }
     }
   });
