@@ -1102,9 +1102,8 @@ function App() {
                </svg>
             </button>
 
-            {/* Dropdown menu */}
-            {isMenuOpen ? (
-              console.log('[Menu Dropdown] Rendering dropdown menu'),
+            {/* Dropdown menu - DEBUG: isMenuOpen = {String(isMenuOpen)} */}
+            {isMenuOpen === true && (
               <div 
                 className="absolute right-0 top-[calc(100%+12px)] w-28 rounded-md z-[9999] glass liquid-panel shadow-xl pointer-events-auto"
                 style={{ 
@@ -1153,7 +1152,7 @@ function App() {
                   <span>Quit</span>
                 </button>
               </div>
-            ) : null}
+            )}
           </div>
         </div>
       </div>
