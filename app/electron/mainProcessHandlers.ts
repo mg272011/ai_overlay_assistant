@@ -1926,116 +1926,85 @@ async function performVisualNavigation(appName: string, cursor: ReturnType<typeo
     return;
   }
 
-  // ADAPTIVE VISION-GUIDED SPOTLIGHT NAVIGATION 
+    // STREAMLINED SPOTLIGHT NAVIGATION WITH RAPID JSON RESPONSES
   try {
-    console.log(`[VisualNav] 🎯 Using adaptive vision-guided Spotlight approach for ${appName}`);
+    console.log(`[VisualNav] 🚀 Using streamlined Spotlight approach for ${appName}`);
     
-    // Step 1: Ensure cursor is always visible on top
-    console.log(`[VisualNav] Ensuring cursor is always visible...`);
-    await cursor.show(); // Make sure cursor window is visible and on top
+    // Step 1: Ensure cursor is visible
+    await cursor.show();
     
-    // Step 2: Move cursor to middle of screen (adjust position for better Spotlight opening)
-    const display = screen.getPrimaryDisplay();
-    const centerX = Math.floor(display.bounds.width / 2) - 20; // Slightly left
-    const centerY = Math.floor(display.bounds.height * 0.35); // Higher up
-    
-    console.log(`[VisualNav] Moving cursor to adjusted middle (${centerX}, ${centerY}) for better Spotlight opening`);
-    await cursor.moveCursor({ x: centerX, y: centerY });
-    await new Promise(resolve => setTimeout(resolve, 200)); // Shorter pause
-    
-    // Step 3: Open Spotlight immediately (no vision needed for this step)
+    // Step 2: Open Spotlight with AppleScript
     console.log(`[VisualNav] Opening Spotlight with Cmd+Space...`);
     await runAppleScript(`tell application "System Events" to keystroke space using command down`);
-    await new Promise(resolve => setTimeout(resolve, 800)); // Wait for Spotlight to open
+    await new Promise(resolve => setTimeout(resolve, 800));
     
-    // Step 4: NOW use vision to find and adapt to Spotlight state
+    // Step 3: Take quick screenshot and get JSON response for input bar coordinates
+    console.log(`[VisualNav] 📸 Taking rapid screenshot to find Spotlight input bar...`);
     const { GeminiVisionService } = await import("./services/GeminiVisionService");
     const visionService = new GeminiVisionService();
     const timestampFolder = createLogFolder(`spotlight-${Date.now()}`);
     
-    console.log(`[VisualNav] 👁️ Spotlight opened, now analyzing input field...`);
+    const screenshot = await takeAndSaveScreenshots("Desktop", timestampFolder);
     
-    try {
-      const screenshot = await takeAndSaveScreenshots("Desktop", timestampFolder);
-      
-      if (screenshot) {
-        // Check if there's existing text to clear first
-        const textResult = await visionService.analyzeScreenForElement(
-          screenshot,
-          "text or content inside the Spotlight search input field"
-        );
-        
-        if (textResult.found) {
-          console.log(`[VisualNav] 👁️ Found existing text in Spotlight, clearing it...`);
-          // Select all and delete existing text
-          await runAppleScript(`tell application "System Events" to keystroke "a" using command down`);
-          await new Promise(resolve => setTimeout(resolve, 200));
-          await runAppleScript(`tell application "System Events" to key code 51`); // Delete key
-          await new Promise(resolve => setTimeout(resolve, 300));
-        }
-        
-                // Now find and click the input field (avoid preview icons!)
-        const inputResult = await visionService.analyzeScreenForElement(
-          screenshot,
-          "Spotlight search text input field only - the empty white rectangular text box at the very top of Spotlight where you type, NOT any app icons or preview suggestions below it"
-        );
+    if (screenshot) {
+      // Rapid JSON response for input bar coordinates - be VERY specific to avoid clicking agent's own input
+      const inputResult = await visionService.analyzeScreenForElement(
+        screenshot,
+        "Find the macOS Spotlight search input field - the white text input box at the top center of the screen that says 'Search' or 'Spotlight Search'. This is NOT the agent's chat input, but the system Spotlight search box where you type to find applications. Return coordinates for the beginning/left side of this input field."
+      );
       
       if (inputResult.found && inputResult.x && inputResult.y) {
-        console.log(`[VisualNav] 👁️ Vision found input field at (${inputResult.x}, ${inputResult.y})`);
+        console.log(`[VisualNav] 👁️ Vision found Spotlight input at (${inputResult.x}, ${inputResult.y})`);
         await cursor.moveCursor({ x: inputResult.x, y: inputResult.y });
-        await new Promise(resolve => setTimeout(resolve, 300));
+        await new Promise(resolve => setTimeout(resolve, 200));
         await cursor.performClick({ x: inputResult.x, y: inputResult.y });
-              } else {
-          // Improved fallback position - exactly in the center of typical Spotlight input field (NOT preview icons)
-          console.log(`[VisualNav] Vision failed, using improved fallback position for TEXT INPUT FIELD`);
-          const inputX = Math.floor(display.bounds.width / 2); // Center horizontally
-          const inputY = Math.floor(display.bounds.height * 0.15); // Higher up, avoiding preview area
-          console.log(`[VisualNav] Clicking fallback TEXT INPUT position at (${inputX}, ${inputY}) - avoiding preview icons`);
-          await cursor.moveCursor({ x: inputX, y: inputY });
-          await new Promise(resolve => setTimeout(resolve, 300));
-          await cursor.performClick({ x: inputX, y: inputY });
-        }
+      } else {
+        // Fallback to typical Spotlight position
+        const display = screen.getPrimaryDisplay();
+        const inputX = Math.floor(display.bounds.width / 2);
+        const inputY = Math.floor(display.bounds.height * 0.15);
+        console.log(`[VisualNav] Using fallback Spotlight input position at (${inputX}, ${inputY})`);
+        await cursor.moveCursor({ x: inputX, y: inputY });
+        await new Promise(resolve => setTimeout(resolve, 200));
+        await cursor.performClick({ x: inputX, y: inputY });
       }
-      
-      // Step 5: Wait a second, then type the app name
-      await new Promise(resolve => setTimeout(resolve, 1000)); // Wait as requested
-      console.log(`[VisualNav] Typing "${appName}" into Spotlight...`);
-      await runAppleScript(`tell application "System Events" to keystroke "${appName}"`);
-      
-      // Step 6: Wait a second for search results
-      await new Promise(resolve => setTimeout(resolve, 1000)); // Wait as requested
-      
-      // Step 7: Use vision to find and click the app
-      console.log(`[VisualNav] 👁️ Using vision to find ${appName} in search results...`);
-      const screenshot2 = await takeAndSaveScreenshots("Desktop", timestampFolder);
-      
-      if (screenshot2) {
-              const appResult = await visionService.analyzeScreenForElement(
+    }
+    
+    // Step 4: Type the app name
+    await new Promise(resolve => setTimeout(resolve, 500));
+    console.log(`[VisualNav] Typing "${appName}" into Spotlight...`);
+    await runAppleScript(`tell application "System Events" to keystroke "${appName}"`);
+    await new Promise(resolve => setTimeout(resolve, 800));
+    
+    // Step 5: Take rapid screenshot and get JSON response for app icon coordinates
+    console.log(`[VisualNav] 📸 Taking rapid screenshot to find ${appName} icon...`);
+    const screenshot2 = await takeAndSaveScreenshots("Desktop", timestampFolder);
+    
+    if (screenshot2) {
+      const appResult = await visionService.analyzeScreenForElement(
         screenshot2,
-        `${appName} application in the search results list below the text input - look for the specific app name "${appName}" with its icon in the results, NOT in any preview area`
+        `Find the "${appName}" application in the Spotlight search results. Look for the app name "${appName}" with its icon in the search results list below the input field. Return coordinates to click on this specific app result.`
       );
       
       if (appResult.found && appResult.x && appResult.y) {
         console.log(`[VisualNav] 👁️ Vision found ${appName} at (${appResult.x}, ${appResult.y})`);
         await cursor.moveCursor({ x: appResult.x, y: appResult.y });
-        await new Promise(resolve => setTimeout(resolve, 300));
+        await new Promise(resolve => setTimeout(resolve, 200));
         await cursor.performClick({ x: appResult.x, y: appResult.y });
-              } else {
-          // Improved fallback to first search result position (below text input, not preview area)
-          console.log(`[VisualNav] Vision failed, clicking improved first SEARCH RESULT position`);
-          const resultX = Math.floor(display.bounds.width / 2); // Center horizontally
-          const resultY = Math.floor(display.bounds.height * 0.25); // In actual search results area
-          console.log(`[VisualNav] Clicking fallback SEARCH RESULT position at (${resultX}, ${resultY}) - avoiding preview icons`);
-          await cursor.moveCursor({ x: resultX, y: resultY });
-          await new Promise(resolve => setTimeout(resolve, 300));
-          await cursor.performClick({ x: resultX, y: resultY });
-        }
+      } else {
+        // Fallback to first result
+        const display = screen.getPrimaryDisplay();
+        const resultX = Math.floor(display.bounds.width / 2);
+        const resultY = Math.floor(display.bounds.height * 0.25);
+        console.log(`[VisualNav] Using fallback first result position at (${resultX}, ${resultY})`);
+        await cursor.moveCursor({ x: resultX, y: resultY });
+        await new Promise(resolve => setTimeout(resolve, 200));
+        await cursor.performClick({ x: resultX, y: resultY });
       }
-    } catch (screenshotError) {
-      console.error(`[VisualNav] Screenshot failed:`, screenshotError);
     }
     
-    await new Promise(resolve => setTimeout(resolve, 1500)); // Wait for app to launch
+    // Step 6: Wait for app to launch
+    await new Promise(resolve => setTimeout(resolve, 1000));
     
     // Step 5: Verify the app opened successfully
     let opened = false;
