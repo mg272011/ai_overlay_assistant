@@ -1895,14 +1895,35 @@ async function performVisualNavigation(appName: string, cursor: ReturnType<typeo
     await runAppleScript(`tell application "System Events" to keystroke space using command down`);
     await new Promise(resolve => setTimeout(resolve, 800)); // Wait for Spotlight to open
     
-    // Step 3: Type the app name directly (Spotlight input should be auto-focused)
+    // Step 3: Move mouse to Spotlight input field and click it
+    console.log(`[VisualNav] Moving mouse to Spotlight input field...`);
+    // Spotlight input is typically at the center-top of the screen
+    const inputX = centerX; // Center horizontally
+    const inputY = Math.floor(display.bounds.height * 0.25); // About 25% down from top
+    
+    await cursor.moveCursor({ x: inputX, y: inputY });
+    await new Promise(resolve => setTimeout(resolve, 300));
+    
+    console.log(`[VisualNav] Clicking Spotlight input field at (${inputX}, ${inputY})...`);
+    await cursor.performClick({ x: inputX, y: inputY });
+    await new Promise(resolve => setTimeout(resolve, 200));
+    
+    // Step 4: Type the app name into the input field
     console.log(`[VisualNav] Typing "${appName}" into Spotlight...`);
     await runAppleScript(`tell application "System Events" to keystroke "${appName}"`);
-    await new Promise(resolve => setTimeout(resolve, 600)); // Wait for search results
+    await new Promise(resolve => setTimeout(resolve, 1000)); // Wait for search results to populate
     
-    // Step 4: Press Enter to open the top result
-    console.log(`[VisualNav] Pressing Enter to open ${appName}...`);
-    await runAppleScript(`tell application "System Events" to keystroke return`);
+    // Step 5: Move mouse to first search result and click it
+    console.log(`[VisualNav] Moving mouse to first search result...`);
+    // First result is typically below the input field
+    const resultX = centerX; // Center horizontally  
+    const resultY = Math.floor(display.bounds.height * 0.35); // About 35% down from top
+    
+    await cursor.moveCursor({ x: resultX, y: resultY });
+    await new Promise(resolve => setTimeout(resolve, 500)); // Wait a second as requested
+    
+    console.log(`[VisualNav] Clicking on ${appName} result at (${resultX}, ${resultY})...`);
+    await cursor.performClick({ x: resultX, y: resultY });
     await new Promise(resolve => setTimeout(resolve, 1500)); // Wait for app to launch
     
     // Step 5: Verify the app opened successfully
