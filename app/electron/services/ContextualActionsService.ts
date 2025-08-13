@@ -109,41 +109,60 @@ export class ContextualActionsService {
       .map(turn => `${turn.speaker}: ${turn.text}`)
       .join('\n');
 
-    const systemPrompt = `You generate contextual SEARCH ACTIONS during live meetings based on topics discussed.
+    const systemPrompt = `You generate SMART contextual search suggestions for professional meetings.
 
-When people mention specific topics, requirements, or questions, generate helpful search queries like:
-- Educational requirements: "[requirement] requirements Ontario", "How to get [credits/hours] in [location]"  
-- Location searches: "Best coffee shops in [city]", "Hotels near [place]", "Things to do in [area]"
-- Business/venue info: "Reviews of [restaurant]", "[Store] opening hours", "[Business] contact info"
-- Event planning: "[Activity] venues in [city]", "How to plan [event type]", "Cost of [service] in [location]"
-- Definitions: "What is [technical term]?", "How does [process] work?"
-- Practical help: "How to apply for [thing]", "Requirements for [program]", "[Process] step by step guide"
+GOOD search suggestions are:
+- Technical/Professional: "React hooks best practices", "Python async/await guide", "Project management methodologies"
+- Business/Market: "Q3 earnings report [company]", "Market analysis [industry] 2024", "Competitor pricing strategies"
+- Educational/Academic: "MIT OpenCourseWare calculus", "Research papers on [topic]", "How to cite APA format"
+- Location/Travel: "Flight deals to [city]", "Conference venues in [location]", "Business hotels near [airport]"
+- Tools/Software: "Figma vs Sketch comparison", "Best IDE for Python development", "Slack alternatives for teams"
+- Industry/Standards: "ISO 9001 certification process", "GDPR compliance checklist", "Healthcare regulations 2024"
 
-Example: If someone says "I need volunteer hours for high school in Ontario", generate:
-- "How to get volunteer hours Ontario high school"
-- "Volunteer opportunities for students Ontario"
-- "Ontario high school graduation requirements"
+BAD search suggestions to NEVER generate:
+- Personal appearance: "latest on [person's name]", "photos of [person]", "[person] personal life"
+- Generic/useless: "information about [vague topic]", "stuff about [thing]", "latest on [random word]"
+- Inappropriate: Anything about someone's appearance, personal life, or private matters
+- Too broad: "everything about [topic]", "all [category] info", "general [subject] knowledge"
+
+Examples of SMART contextual searches:
+
+If discussing a technical problem:
+✓ "Stack Overflow [specific error message]"
+✓ "[Technology] troubleshooting guide"
+✓ "[Framework] version compatibility issues"
+
+If discussing business strategy:
+✓ "[Industry] market trends 2024"
+✓ "Case studies [business model] success"
+✓ "[Competitor] annual report analysis"
+
+If someone mentions a person in a professional context:
+✓ "[Person's company] recent news" (NOT about the person personally)
+✓ "[Their product/service] reviews" (focus on their work, not them)
+✓ NEVER search for personal information about individuals
 
 Return JSON with this exact structure:
 {
   "searchItems": [
     {
-      "text": "Human-readable search action",
+      "text": "Human-readable search action", 
       "type": "search",
-      "query": "search query to use",
+      "query": "professional, specific search query",
       "confidence": 0.8
     }
   ],
   "suggestions": []
 }
 
-Rules:
-- Generate 2-3 searchItems for ANY concrete topics, requirements, or needs mentioned
-- Focus on practical, actionable searches that answer the speaker's implicit questions
-- If someone mentions needing something, generate searches for how to get it
-- For educational topics, include requirement searches and how-to guides
-- Return empty arrays only if the text is purely abstract with no searchable topics
-- Valid JSON only.`;
+STRICT RULES:
+1. Only suggest searches that would be appropriate in a professional workplace
+2. Focus on actionable, specific information (not vague "latest on X")  
+3. If a person is mentioned, only search for their professional work/company, NEVER personal info
+4. Skip generating suggestions if the topic is too personal or casual
+5. Maximum 2-3 high-quality suggestions, better to have none than bad ones
+6. Each search must be specific enough to return useful results
+7. Valid JSON only`;
 
     const userPrompt = `Recent conversation context:
 ${recentContext}
@@ -269,9 +288,7 @@ Generate contextual SEARCH ACTIONS for topics mentioned.`;
       const k = keywords[1];
       out.push(make(`Latest on ${k}`, `${k} latest`, 1));
     }
-    if (out.length < needed) {
-      out.push(make('Define key terms from the conversation', 'define term from conversation context', 2));
-    }
+    // Removed "Define key terms from the conversation" action as requested
     return out.slice(0, needed);
   }
 
