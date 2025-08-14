@@ -1560,8 +1560,8 @@ Provide a friendly greeting that invites them to ask for help with tasks. Be wel
           await cursor.create();
           await cursor.show();
           
-                // Start visual navigation loop (uses Dock AX + Spotlight fallback)
-      await performVisualNavigation(appName, cursor, event);
+          // Use the new hybrid app opening approach
+          await performAction(`=OpenApp\n${appName}`, "com.apple.desktop", [], event, true);
       // For a simple open-only prompt, stop here — do not run the action agent
       if (isOpenOnlyPrompt) {
         return;
@@ -2419,7 +2419,7 @@ async function executePlan(
       let appName = (step.params?.appName as string) || 'Safari';
       if (appName === 'Google Chrome') { appName = await resolvePreferredBrowser(); }
       await cursor.show();
-      await performVisualNavigation(appName, cursor, event);
+      await performAction(`=OpenApp\n${appName}`, "com.apple.desktop", [], event, true);
       let ok = false; for (let i = 0; i < 6; i++) { if (await isAppFrontmost(appName) || await isAppVisible(appName)) { ok = true; break; } await new Promise(r => setTimeout(r, 300)); }
       console.log(`[Plan] Step ${step.id} ${ok ? 'completed' : 'pending'}`);
     } else if (step.action === 'navigate_url') {
