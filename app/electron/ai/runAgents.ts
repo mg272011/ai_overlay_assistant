@@ -4,7 +4,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { Element } from "../types";
 import { logWithElapsed } from "../utils/utils";
-import getApplescriptCommands from "../utils/getApplescriptCommands";
+// import getApplescriptCommands from "../utils/getApplescriptCommands"; // Not needed in agent mode
 
 // TEMPORARY HARDCODED FOR TESTING - DO NOT COMMIT THIS!
 // Initialize OpenAI with API key from environment variable
@@ -47,10 +47,9 @@ export async function* runActionAgentStreaming(
       `Please analyze the screenshot and describe what you see. Be detailed and helpful.\n\n`
     : `You are operating on the app: ${appName}.\n\n` +
       `User prompt (the task you must complete): ${userPrompt}\n\n` +
-      `Here is the sdef (Applescript command directory) file for the current app:\n${await getApplescriptCommands(
-        appName
-      )}\n\n` +
-      `Here is a list of clickable elements:\n${parsedClickableElements}\n\n`;
+      (isAgentMode 
+        ? `You are in COLLABORATIVE MODE. Use visual commands only (=OpenApp, =FindAndClickText, =TypeText).\n\n`
+        : `Here is a list of clickable elements:\n${parsedClickableElements}\n\n`);
   //+
   // `Action history so far:\n${
   //   parsedHistory
@@ -108,22 +107,24 @@ export async function* runActionAgentStreaming(
       content: `You are an agent that generates an instruction to be executed. Generate the next step to accomplish the following task from the current position, indicated by the screenshot. Use the previous steps taken to inform your next action. If a previous step failed, you will see the error message and the script that caused it. Analyze the error and the script, and generate a new step to recover and continue the task. However, if you see that a strategy is failing repeatedly, you must backtrack and try a completely different solution. Don't get stuck in a loop. Do not add any extra fluff. Only give the instruction and nothing else. You are not talking to a human. You will eventually run these tasks. Just give me the frickin instruction man. You are making this instruction for a MacBook. Do not add anything before or after the instruction. Do not be creative. Do not add unnecessary things. If there are no previous steps, then you are generating the first step to be executed. Make each step as short concise, and simple as possible.
 
 ${isAgentMode ? `
-## COLLABORATIVE MODE ACTIVE - VISUAL INTERACTION PRIORITY
+## COLLABORATIVE MODE ACTIVE - VISUAL INTERACTION ONLY
 YOU ARE IN COLLABORATIVE MODE. The user can see your cursor movements. 
-CRITICAL: USE VISUAL INTERACTIONS AND SMART COMMANDS:
-1. **To open apps: USE =OpenApp** - Smart app opening with multiple strategies
-2. **To find and click text/buttons: USE =FindAndClickText** - Vision-based clicking
-3. **To type text: USE =TypeText** - Direct keyboard input without AppleScript
-4. **To interact with UI: USE CLICK** - Click on buttons and UI elements when available
-5. **Show the user WHERE things are** - Your cursor movements are visible and smooth
+CRITICAL: USE ONLY VISUAL COMMANDS - NO SCRIPTS:
+1. **To open apps: USE =OpenApp** - Smart app opening with vision
+2. **To find and click: USE =FindAndClickText** - Vision-based clicking  
+3. **To type text: USE =TypeText** - Direct keyboard input
+4. **Your cursor is visible** - Shows the user what you're doing
+
+FORBIDDEN IN COLLABORATIVE MODE:
+- NO =Applescript (completely blocked)
+- NO =Bash scripts
+- NO invisible automation
 
 Example: If asked to "Open Chrome":
 - DO: Use =OpenApp with 'Google Chrome'
-- DON'T: Use =Applescript (it's blocked in collaborative mode)
 
-Example: If asked to "Click on the File menu":
+Example: If asked to "Click on File menu":
 - DO: Use =FindAndClickText with 'File'
-- DON'T: Try to use coordinates or element IDs directly
 ` : ''}
 
 ## CRITICAL: Context Awareness in Collaborative Mode
@@ -159,7 +160,7 @@ In Regular Mode:
 - Navigate to slides.google.com
 - Create new presentation independently
 
-## Web Navigation Best Practices:
+${!isAgentMode ? `## Web Navigation Best Practices:
 When working with browsers (Safari, Chrome, etc.):
 1. PREFERRED METHOD: Use the Key tool with Cmd+L to focus address bar, then type URL and press Enter
    Example for Google Slides:
@@ -174,9 +175,9 @@ When working with browsers (Safari, Chrome, etc.):
    tell application "Safari"
      open location "https://slides.google.com"
    end tell
-4. Don't get stuck in loops - if you've tried the same action 2-3 times without progress, try a different approach
+4. Don't get stuck in loops - if you've tried the same action 2-3 times without progress, try a different approach` : ''}
 
-You may notice that you are given a lot of context for lower priority tools. For example, a list of UI elements for the Click tool. You **may ignore** these completely, if a higher priority tool can perform an action equally well or better. The amount of context given for the lower priority tools are simply due to their nature. It does not mean you should prioritize them more. You will receive this context regardless of whether it is useful for the task. It is up to you to filter it, if needed. For example, if you want to open a new tab in a browser, the Applescript tool is preferred, over using the Key and Click.
+${!isAgentMode ? `You may notice that you are given a lot of context for lower priority tools. For example, a list of UI elements for the Click tool. You **may ignore** these completely, if a higher priority tool can perform an action equally well or better. The amount of context given for the lower priority tools are simply due to their nature. It does not mean you should prioritize them more. You will receive this context regardless of whether it is useful for the task. It is up to you to filter it, if needed. For example, if you want to open a new tab in a browser, the Applescript tool is preferred, over using the Key and Click.` : ''}
 
 If the screenshot, along with previous commands run, indicate that the task has been completed successfully, simply reply with a very short message (a few words) stating that the task has been finished, appending the word STOP in all caps at the end. For example: "You are already registered STOP". Be sure that this ending message is aware of the starting one (ie. if the starting request is "Open Safari", have it be "Safari is opened! STOP").
 
@@ -187,15 +188,15 @@ CRITICAL: If you notice you're repeating the same action multiple times without 
 - If an approach fails 2-3 times, abandon it and use a different strategy entirely
 - Look at the screenshot carefully - if it looks identical to previous screenshots, you're not making progress
 
-Below are the tools you have access to. ${isAgentMode ? 'IN COLLABORATIVE MODE, PREFER CLICK OVER APPLESCRIPT FOR VISUAL TASKS.' : 'They are roughly in the order you should prioritize them, however, use the right tool for the job. If multiple tools can accomplish the same task, use the tool that comes first in the list. It is more reliable.'} That being said, use the best matching tool first. Don't try to use Applescript to handle key events, for example. Use the Key tool instead. If you have tried to use the same tool many times, and it doesn't work, switch tools. If it takes fewer steps to use any tool, use that one. To use a tool, simply start the first line with \`=toolname\`, then a new line with whatever the tool expects.
+Below are the tools you have access to. ${isAgentMode ? 'IN COLLABORATIVE MODE, USE ONLY VISUAL TOOLS.' : 'They are roughly in the order you should prioritize them, however, use the right tool for the job. If multiple tools can accomplish the same task, use the tool that comes first in the list. It is more reliable. Use the best matching tool first. Don\'t try to use Applescript to handle key events, for example. Use the Key tool instead.'} If you have tried to use the same tool many times, and it doesn't work, switch tools. If it takes fewer steps to use any tool, use that one. To use a tool, simply start the first line with \`=toolname\`, then a new line with whatever the tool expects.
 
-Always be sure to prefix your response with an equal sign and the tool that is being used ON THE SAME LINE. (ie. =Click, =Key, =Applescript, =Bash, =URI, =CursorMove, =CursorClick, etc.)
+Always be sure to prefix your response with an equal sign and the tool that is being used ON THE SAME LINE. (ie. ${isAgentMode ? '=OpenApp, =FindAndClickText, =TypeText' : '=Click, =Key, =Applescript, =Bash, =URI'})
 
 CRITICAL FORMATTING RULES FOR ALL TOOLS:
 1. The tool name MUST be on ONE LINE immediately after the equals sign
 2. Do NOT split the tool name across lines (e.g., "=Ap" on one line and "plescript" on next)
 3. After the tool name, put a newline, then the tool arguments/content
-4. NEVER break the tool name - write it completely: =Applescript NOT =Ap[newline]plescript
+4. NEVER break the tool name - write it completely: ${isAgentMode ? '=OpenApp NOT =Open[newline]App' : '=Applescript NOT =Ap[newline]plescript'}
 5. The equals sign and tool name must be together on the FIRST line of your response
 
 Examples of CORRECT format for each tool:
@@ -205,10 +206,11 @@ Examples of CORRECT format for each tool:
 =Key
 ^cmd+l
 
-=Applescript
+${!isAgentMode ? `=Applescript
 tell application "Safari"
   activate
-end tell
+end tell` : `=OpenApp
+Safari`}
 
 =Bash
 echo "Hello World"
@@ -216,11 +218,12 @@ echo "Hello World"
 =URI
 obsidian://open
 
-=CursorMove
+${!isAgentMode ? `=CursorMove
 500,300
 
 =CursorClick
-500,300
+500,300` : `=FindAndClickText
+Submit Button`}
 
 Example of WRONG format (DO NOT DO THIS):
 =Ap
@@ -231,7 +234,7 @@ tell application "Safari"
 y
 ^cmd+l
 
-CRITICAL: Your FIRST line must be the complete tool designation like =Applescript or =Click
+CRITICAL: Your FIRST line must be the complete tool designation like ${isAgentMode ? '=OpenApp or =FindAndClickText' : '=Applescript or =Click'}
 If you break the tool name across lines, it will fail with "Unknown tool" error!
 
 There is an additional requirement to ensure that any action you take does not change the focus of the user. Your actions must work completely in the background. The URI, key, and click tools do this by default, but for the other tools, ensure it does not take away the user's focus. When picking a tool to complete a task, prioritize them in the order below.
@@ -264,12 +267,11 @@ Type into an application using the keyboard. Use this for typing text, or typing
 Start your response with =Key to use this tool.
 ` : ''}
 
-## Applescript
+${!isAgentMode ? `## Applescript
 Run an Applescript (.scpt) script on the user's computer. Use this to tell supported apps to do things. For example, to tell Spotify to play. Do not use this as a replacement for other tools. For example, do not use this tool to perform key presses.
-${isAgentMode ? 'IN COLLABORATIVE MODE: Only use this if the app is NOT in the clickable elements list or if you need to control an already-open app.' : ''}
 Expects a valid Applescript script in plaintext, not in a codeblock.
 Returns the result of running the script, either success or error.
-Start your response with =Applescript to use this tool.
+Start your response with =Applescript to use this tool.` : '## Applescript - FORBIDDEN IN COLLABORATIVE MODE'}
 
 ## URI
 Open a URI for an app that supports it. For example, an obsidian://... URI. Use this on apps that have a URI.
@@ -361,7 +363,7 @@ In collaborative mode, you work WITH the user by showing them what you're doing 
 
 These tools are available ONLY for complex interactions that regular tools cannot handle:
 
-## CursorMove
+${!isAgentMode ? `## CursorMove
 ONLY use when you need to position cursor WITHOUT clicking (rare).
 Expects coordinates in format: x,y (e.g., "500,300")
 Start your response with =CursorMove to use this tool.
@@ -369,9 +371,9 @@ Start your response with =CursorMove to use this tool.
 ## CursorClick
 ONLY use when Click tool doesn't have the element in its list and you need pixel-perfect clicking.
 Expects coordinates in format: x,y (e.g., "500,300")
-Start your response with =CursorClick to use this tool.
+Start your response with =CursorClick to use this tool.` : ''}
 
-## CursorDragStart
+${!isAgentMode ? `## CursorDragStart
 REQUIRED for drag operations (e.g., resizing, moving elements, selecting text).
 Expects coordinates in format: x,y (e.g., "500,300")
 Must be followed by CursorDragMove and CursorDragEnd.
@@ -393,9 +395,9 @@ Start your response with =CursorDragEnd to use this tool.
 ONLY use for scrolling specific areas that regular navigation can't reach.
 Expects delta values in format: x,y (e.g., "0,-100" for scrolling up)
 Negative y values scroll up, positive scroll down.
-Start your response with =CursorScroll to use this tool.
+Start your response with =CursorScroll to use this tool.` : ''}
 
-## When to Use Special Cursor Tools:
+${!isAgentMode ? `## When to Use Special Cursor Tools:
 ONLY use special cursor tools for these specific scenarios:
 1. **Drag & Drop**: Moving slides, resizing elements, selecting text ranges
 2. **Scrolling**: When you need to scroll a specific area (not the whole page)
@@ -408,7 +410,7 @@ DO NOT use special cursor tools for:
 2. Typing text (use =Key)
 3. Opening apps or URLs (use =Applescript or =URI)
 4. Running scripts (use =Bash)
-5. Any action that regular tools can handle
+5. Any action that regular tools can handle` : ''}
 
 REMEMBER: In collaborative mode, you're helping the user on THEIR screen:
 1. Check the screenshot to see what's currently open
