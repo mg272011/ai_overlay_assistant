@@ -950,10 +950,22 @@ Respond with exactly this format:
 SCREENSHOT_NEEDED: [YES/NO]
 REASON: [brief reason]`;
 
-        const analysisResult = await fastModel.generateContent(analysisPrompt);
-        const analysisText = analysisResult.response.text();
-        const needsScreenshot = analysisText.includes('SCREENSHOT_NEEDED: YES');
-        console.log(`[MainHandlers] 💬 Chat fast path: Screenshot needed = ${needsScreenshot}`);
+        // Add timeout for analysis to prevent hanging
+        const analysisPromise = fastModel.generateContent(analysisPrompt);
+        const timeoutPromise = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Analysis timeout')), 5000)
+        );
+        
+        let needsScreenshot = false;
+        try {
+          const analysisResult = await Promise.race([analysisPromise, timeoutPromise]) as any;
+          const analysisText = analysisResult.response.text();
+          needsScreenshot = analysisText.includes('SCREENSHOT_NEEDED: YES');
+          console.log(`[MainHandlers] 💬 Chat fast path: Screenshot needed = ${needsScreenshot}`);
+        } catch (timeoutError) {
+          console.warn('[MainHandlers] Screenshot analysis timed out, proceeding without screenshot');
+          needsScreenshot = false;
+        }
 
         // Optional: include one screenshot if needed
         let screenshotBase64: string | undefined;
@@ -988,21 +1000,60 @@ User: ${userPrompt}`;
         }
 
         let fullAssistant = '';
-        const result = await chatSession.sendMessageStream(contentParts);
-        for await (const chunk of result.stream) {
-          const chunkText = chunk.text();
-          if (chunkText) {
-            event.sender.send("stream", { type: "text", content: chunkText });
-            fullAssistant += chunkText;
+        let streamStarted = false;
+        
+        // Set a timeout for the entire streaming operation
+        const streamTimeout = setTimeout(() => {
+          if (!streamStarted) {
+            console.error('[MainHandlers] Chat stream timeout - no response received');
+            event.sender.send("reply", { 
+              type: "error", 
+              message: "Response timeout. Please try again." 
+            });
+            event.sender.send("stream", { type: "stream_end" });
           }
+        }, 10000); // 10 second timeout
+        
+        try {
+          const result = await chatSession.sendMessageStream(contentParts);
+          for await (const chunk of result.stream) {
+            const chunkText = chunk.text();
+            if (chunkText) {
+              streamStarted = true;
+              clearTimeout(streamTimeout); // Clear timeout once we get first chunk
+              event.sender.send("stream", { type: "text", content: chunkText });
+              fullAssistant += chunkText;
+            }
+          }
+          event.sender.send("stream", { type: "stream_end" });
+          if (fullAssistant.trim()) {
+            appendToHistory(senderId, 'assistant', fullAssistant.trim());
+          }
+        } finally {
+          clearTimeout(streamTimeout);
         }
+      } catch (error: any) {
+        console.error('[MainHandlers] ❌ Chat fast path error:', error);
+        console.error('[MainHandlers] Error details:', {
+          message: error?.message,
+          stack: error?.stack,
+          name: error?.name
+        });
+        
+        // Send a more informative error message
+        const errorMessage = error?.message?.includes('API key') 
+          ? "API key issue. Please check your Gemini API key."
+          : error?.message?.includes('quota')
+          ? "API quota exceeded. Please try again later."
+          : `Chat error: ${error?.message || 'Unknown error'}`;
+        
+        event.sender.send("reply", { 
+          type: "error", 
+          message: errorMessage 
+        });
+        
+        // Also send stream_end to clean up UI state
         event.sender.send("stream", { type: "stream_end" });
-        if (fullAssistant.trim()) {
-          appendToHistory(senderId, 'assistant', fullAssistant.trim());
-        }
-      } catch (error) {
-        console.error('[MainHandlers] Chat fast path error:', error);
-        event.sender.send("reply", { type: "error", message: "Chat temporarily unavailable. Please try again." });
       }
       return;
     }
