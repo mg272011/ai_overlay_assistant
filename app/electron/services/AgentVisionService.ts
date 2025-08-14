@@ -146,7 +146,7 @@ export class AgentVisionService {
         : `Find the text or UI element "${targetText}" on this screenshot. Return ONLY the center coordinates where it should be clicked. Respond with JSON: {"found": true/false, "x": number, "y": number}`;
 
       const response = await this.openai.chat.completions.create({
-        model: "gpt-4o-realtime-preview",
+        model: "gpt-5",
         messages: [
           {
             role: "user",
@@ -161,8 +161,7 @@ export class AgentVisionService {
             ]
           }
         ],
-        max_tokens: 50,
-        temperature: 0.0
+        max_completion_tokens: 50
       });
 
       const responseText = response.choices[0]?.message?.content?.trim();
@@ -450,12 +449,16 @@ Respond with only: TRUE or FALSE`;
       const base64Image = imageData.toString('base64');
 
       const prompt = `Look at this macOS dock screenshot. Find the "${appName}" app icon on the dock. 
-If you find it, return coordinates where to click. If the app is NOT visible on the dock, return found: false.
+The dock is typically at the bottom of the screen. Look carefully for the app icon.
 
-Respond with JSON only: {"found": true/false, "x": number, "y": number}`;
+If you find "${appName}" on the dock, return the exact coordinates where to click it.
+If you cannot find "${appName}" on the dock, return found: false.
+
+IMPORTANT: Respond with ONLY valid JSON: {"found": true/false, "x": number, "y": number}
+No other text, no markdown, just the JSON.`;
 
       const response = await this.openai.chat.completions.create({
-        model: "gpt-4o-realtime-preview",
+        model: "gpt-5",
         messages: [
           {
             role: "user",
@@ -470,12 +473,14 @@ Respond with JSON only: {"found": true/false, "x": number, "y": number}`;
             ]
           }
         ],
-        max_tokens: 30,
-        temperature: 0.0
+        max_completion_tokens: 30
       });
 
       const responseText = response.choices[0]?.message?.content?.trim();
+      console.log(`[AgentVision] GPT-5 raw response for "${appName}":`, responseText);
+      
       if (!responseText) {
+        console.log('[AgentVision] No response text from GPT-5');
         return { found: false };
       }
 
@@ -484,17 +489,19 @@ Respond with JSON only: {"found": true/false, "x": number, "y": number}`;
         let cleanResponse = responseText;
         if (responseText.includes('```json')) {
           cleanResponse = responseText.replace(/```json\n?/g, '').replace(/```/g, '').trim();
+          console.log('[AgentVision] Cleaned response from markdown:', cleanResponse);
         }
         
         const result = JSON.parse(cleanResponse);
-        console.log(`[AgentVision] GPT-4o dock search for "${appName}":`, result);
+        console.log(`[AgentVision] GPT-5 dock search for "${appName}":`, result);
         return {
           found: result.found || false,
           x: result.x,
           y: result.y
         };
       } catch (parseError) {
-        console.error('[AgentVision] Failed to parse GPT-4o dock response:', responseText);
+        console.error('[AgentVision] Failed to parse GPT-5 dock response:', responseText);
+        console.error('[AgentVision] Parse error details:', parseError);
         return { found: false };
       }
     } catch (error) {
