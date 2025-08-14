@@ -1,9 +1,9 @@
-import { GeminiVisionService } from './GeminiVisionService';
 import { takeAndSaveScreenshots } from '../utils/screenshots';
 import { getVirtualCursor } from '../performAction';
 import { execPromise } from '../utils/utils';
 import * as path from 'path';
 import { app, screen } from 'electron';
+import OpenAI from 'openai';
 
 interface ActionResult {
   success: boolean;
@@ -21,12 +21,14 @@ interface ElementLocation {
 }
 
 export class AgentVisionService {
-  private visionService: GeminiVisionService;
+  private openai: OpenAI;
   private maxRetries = 3;
   private screenshotDelay = 500; // ms to wait after actions before screenshot
 
   constructor() {
-    this.visionService = new GeminiVisionService();
+    this.openai = new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY
+    });
   }
 
   /**
@@ -45,8 +47,8 @@ export class AgentVisionService {
       return await this.clickAndVerify(ocrResult.x, ocrResult.y, targetText);
     }
 
-    // Step 2: Fall back to Gemini Vision
-    console.log(`[AgentVision] Local OCR failed, using Gemini Vision...`);
+    // Step 2: Fall back to GPT-4o Vision
+    console.log(`[AgentVision] Local OCR failed, using GPT-4o Vision...`);
     const screenshot = await this.takeScreenshot();
     if (!screenshot) {
       return { success: false, message: 'Failed to take screenshot' };
@@ -56,10 +58,10 @@ export class AgentVisionService {
       ? `${context}. Find "${targetText}" and return its center coordinates.`
       : `Find the text or UI element labeled "${targetText}" on the screen. Return the center coordinates where it should be clicked.`;
 
-    const visionResult = await this.visionService.analyzeScreenForElement(screenshot, prompt);
+    const visionResult = await this.analyzeScreenWithGPT4o(screenshot, targetText, context);
     
     if (visionResult.found && visionResult.x && visionResult.y) {
-      console.log(`[AgentVision] Found via Gemini at (${visionResult.x}, ${visionResult.y})`);
+      console.log(`[AgentVision] Found via GPT-4o at (${visionResult.x}, ${visionResult.y})`);
       return await this.clickAndVerify(visionResult.x, visionResult.y, targetText);
     }
 
@@ -123,6 +125,68 @@ export class AgentVisionService {
   }
 
   /**
+   * Analyze screen using GPT-4o Vision to find coordinates
+   */
+  private async analyzeScreenWithGPT4o(
+    screenshotPath: string, 
+    targetText: string, 
+    context?: string
+  ): Promise<ElementLocation> {
+    try {
+      // Read the screenshot file as base64
+      const fs = require('fs');
+      const imageData = fs.readFileSync(screenshotPath);
+      const base64Image = imageData.toString('base64');
+
+      const prompt = context 
+        ? `${context}. Find "${targetText}" on this screenshot and return ONLY the x,y coordinates where it should be clicked. Respond with JSON: {"found": true/false, "x": number, "y": number}`
+        : `Find the text or UI element "${targetText}" on this screenshot. Return ONLY the center coordinates where it should be clicked. Respond with JSON: {"found": true/false, "x": number, "y": number}`;
+
+      const response = await this.openai.chat.completions.create({
+        model: "gpt-4o",
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "text", text: prompt },
+              {
+                type: "image_url",
+                image_url: {
+                  url: `data:image/png;base64,${base64Image}`
+                }
+              }
+            ]
+          }
+        ],
+        max_tokens: 100,
+        temperature: 0.1
+      });
+
+      const responseText = response.choices[0]?.message?.content?.trim();
+      if (!responseText) {
+        return { found: false };
+      }
+
+      try {
+        const result = JSON.parse(responseText);
+        return {
+          found: result.found || false,
+          x: result.x,
+          y: result.y,
+          confidence: 1.0,
+          description: 'Found via GPT-4o Vision'
+        };
+      } catch (parseError) {
+        console.error('[AgentVision] Failed to parse GPT-4o response:', responseText);
+        return { found: false };
+      }
+    } catch (error) {
+      console.error('[AgentVision] GPT-4o vision error:', error);
+      return { found: false };
+    }
+  }
+
+  /**
    * Take a screenshot with consistent naming
    */
   private async takeScreenshot(): Promise<string | null> {
@@ -152,9 +216,10 @@ export class AgentVisionService {
         continue;
       }
 
-      const result = await this.visionService.analyzeScreenForElement(
+      const result = await this.analyzeScreenWithGPT4o(
         screenshot,
-        `Is "${elementDescription}" visible on screen? Return its coordinates if found.`
+        elementDescription,
+        `Check if "${elementDescription}" is visible on screen`
       );
 
       if (result.found) {
@@ -263,9 +328,10 @@ export class AgentVisionService {
     const screenshot = await this.takeScreenshot();
     if (!screenshot) return false;
 
-    const result = await this.visionService.analyzeScreenForElement(
+    const result = await this.analyzeScreenWithGPT4o(
       screenshot,
-      `Is the application "${appName}" currently visible on screen? Look for its window, title bar, or any UI elements that indicate it's open.`
+      appName,
+      `Check if the application "${appName}" is currently visible on screen. Look for its window, title bar, or any UI elements that indicate it's open.`
     );
 
     return result.found || false;
