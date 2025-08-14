@@ -137,7 +137,7 @@ export class AgentVisionService {
   ): Promise<ElementLocation> {
     try {
       // Read the screenshot file as base64
-      const fs = require('fs');
+      const fs = await import('fs');
       const imageData = fs.readFileSync(screenshotPath);
       const base64Image = imageData.toString('base64');
 
@@ -190,14 +190,30 @@ export class AgentVisionService {
   }
 
   /**
-   * Take a screenshot with consistent naming
+   * Take a full desktop screenshot to see dock and all apps
    */
   private async takeScreenshot(): Promise<string | null> {
     try {
-      const screenshots = await takeAndSaveScreenshots('Desktop', `agent-vision-${Date.now()}`);
-      return screenshots?.[0] || null;
+      const fs = await import('fs');
+      const path = await import('path');
+      
+      // Create a screenshot using macOS screencapture command
+      const timestamp = Date.now();
+      const screenshotPath = path.join(process.cwd(), 'app', 'logs', `desktop-${timestamp}.png`);
+      
+      // Ensure directory exists
+      const dir = path.dirname(screenshotPath);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      
+      // Use macOS screencapture for full desktop capture (including dock)
+      await execPromise(`screencapture -x "${screenshotPath}"`);
+      
+      console.log(`[AgentVision] Full desktop screenshot saved: ${screenshotPath}`);
+      return screenshotPath;
     } catch (error) {
-      console.error('[AgentVision] Screenshot error:', error);
+      console.error('[AgentVision] Desktop screenshot error:', error);
       return null;
     }
   }
@@ -410,7 +426,7 @@ Respond with only: TRUE or FALSE`;
    */
   async findAppOnDock(appName: string, screenshotPath: string): Promise<{found: boolean, x?: number, y?: number}> {
     try {
-      const fs = require('fs');
+      const fs = await import('fs');
       const imageData = fs.readFileSync(screenshotPath);
       const base64Image = imageData.toString('base64');
 
