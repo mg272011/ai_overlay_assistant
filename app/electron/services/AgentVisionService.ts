@@ -171,7 +171,13 @@ export class AgentVisionService {
       }
 
       try {
-        const result = JSON.parse(responseText);
+        // Remove markdown code blocks if present
+        let cleanResponse = responseText;
+        if (responseText.includes('```json')) {
+          cleanResponse = responseText.replace(/```json\n?/g, '').replace(/```/g, '').trim();
+        }
+        
+        const result = JSON.parse(cleanResponse);
         return {
           found: result.found || false,
           x: result.x,
@@ -461,7 +467,13 @@ Respond with JSON only: {"found": true/false, "x": number, "y": number}`;
       }
 
       try {
-        const result = JSON.parse(responseText);
+        // Remove markdown code blocks if present
+        let cleanResponse = responseText;
+        if (responseText.includes('```json')) {
+          cleanResponse = responseText.replace(/```json\n?/g, '').replace(/```/g, '').trim();
+        }
+        
+        const result = JSON.parse(cleanResponse);
         console.log(`[AgentVision] GPT-4o dock search for "${appName}":`, result);
         return {
           found: result.found || false,
