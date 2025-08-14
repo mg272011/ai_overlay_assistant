@@ -146,7 +146,7 @@ export class AgentVisionService {
         : `Find the text or UI element "${targetText}" on this screenshot. Return ONLY the center coordinates where it should be clicked. Respond with JSON: {"found": true/false, "x": number, "y": number}`;
 
       const response = await this.openai.chat.completions.create({
-        model: "gpt-4o",
+        model: "gpt-4o-realtime-preview",
         messages: [
           {
             role: "user",
@@ -161,8 +161,8 @@ export class AgentVisionService {
             ]
           }
         ],
-        max_tokens: 100,
-        temperature: 0.1
+        max_tokens: 50,
+        temperature: 0.0
       });
 
       const responseText = response.choices[0]?.message?.content?.trim();
@@ -324,14 +324,27 @@ export class AgentVisionService {
       if (dockResult.found && dockResult.x && dockResult.y) {
         console.log(`[AgentVision] Found ${appName} on dock, clicking at (${dockResult.x}, ${dockResult.y})`);
         const cursor = getVirtualCursor();
+        
+        // Ensure cursor is visible and on top
+        await cursor.show();
+        await cursor.bringToFront();
+        
+        // Move to coordinates and click
         await cursor.moveCursor({ x: dockResult.x, y: dockResult.y });
-        await new Promise(resolve => setTimeout(resolve, 200));
+        await new Promise(resolve => setTimeout(resolve, 300));
         await cursor.performClick({ x: dockResult.x, y: dockResult.y });
-        await new Promise(resolve => setTimeout(resolve, 1500));
+        console.log(`[AgentVision] Click performed on ${appName} at (${dockResult.x}, ${dockResult.y})`);
+        
+        // Wait longer for app to launch
+        await new Promise(resolve => setTimeout(resolve, 2500));
+        
+        // Verify the app actually opened
+        const isNowOpen = await this.isApplicationVisible(appName);
+        console.log(`[AgentVision] ${appName} is now visible: ${isNowOpen}`);
         
         return {
           success: true,
-          message: `Opened ${appName} from dock`
+          message: `${isNowOpen ? 'Opened' : 'Attempted to open'} ${appName} from dock`
         };
       }
     }
@@ -442,7 +455,7 @@ If you find it, return coordinates where to click. If the app is NOT visible on 
 Respond with JSON only: {"found": true/false, "x": number, "y": number}`;
 
       const response = await this.openai.chat.completions.create({
-        model: "gpt-4o",
+        model: "gpt-4o-realtime-preview",
         messages: [
           {
             role: "user",
@@ -457,8 +470,8 @@ Respond with JSON only: {"found": true/false, "x": number, "y": number}`;
             ]
           }
         ],
-        max_tokens: 50,
-        temperature: 0.1
+        max_tokens: 30,
+        temperature: 0.0
       });
 
       const responseText = response.choices[0]?.message?.content?.trim();
@@ -491,6 +504,21 @@ Respond with JSON only: {"found": true/false, "x": number, "y": number}`;
   }
 
   private async isApplicationVisible(appName: string): Promise<boolean> {
+    // First check if it's the frontmost app (faster)
+    try {
+      const { stdout } = await execPromise(`osascript -e 'tell application "System Events" to name of first process whose frontmost is true'`);
+      const frontmostApp = stdout.trim();
+      console.log(`[AgentVision] Frontmost app: ${frontmostApp}, looking for: ${appName}`);
+      
+      if (frontmostApp === appName || frontmostApp.toLowerCase().includes(appName.toLowerCase())) {
+        console.log(`[AgentVision] ${appName} is frontmost!`);
+        return true;
+      }
+    } catch (error) {
+      console.warn('[AgentVision] Could not check frontmost app:', error);
+    }
+
+    // Fallback to visual check
     const screenshot = await this.takeScreenshot();
     if (!screenshot) return false;
 
