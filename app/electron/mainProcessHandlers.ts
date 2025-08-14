@@ -1074,11 +1074,20 @@ User: ${userPrompt}`;
     let isOpenCommand = false;
     
     try {
-      // Fast path for agent mode - skip slow app detection
+      // Fast path for agent mode - use hybrid app detection
       if (isAgentMode) {
-        console.log(`[MainHandlers] 🚀 Agent mode: Fast path - agent will handle app navigation`);
-        appName = "Desktop"; // Agent will handle everything
-        isOpenCommand = false;
+        console.log(`[MainHandlers] 🚀 Agent mode: Using hybrid app detection`);
+        const { agentVision } = await import("./services/AgentVisionService");
+        const needsApp = await agentVision.shouldOpenApp(userPrompt);
+        if (needsApp) {
+          console.log(`[MainHandlers] 🚀 Gemini says: App opening needed`);
+          appName = "Desktop"; // Agent will handle app opening with hybrid approach
+          isOpenCommand = true;
+        } else {
+          console.log(`[MainHandlers] 🚀 Gemini says: No app opening needed`);
+          appName = "Desktop";
+          isOpenCommand = false;
+        }
       } else if (isChatMode) {
         console.log(`[MainHandlers] 💬 Chat mode: Skipping app detection, going to conversational analysis`);
         appName = "NONE"; // Don't try to detect any app in chat mode
@@ -1158,9 +1167,14 @@ User: ${userPrompt}`;
           }
           
           try {
-            // Take screenshot for analysis
-            const screenshotBase64 = await takeAndSaveScreenshots("Desktop", stepFolder);
-            console.log('[MainHandlers] Screenshot captured, base64 length:', screenshotBase64?.length || 0);
+            // Take screenshot for analysis (skip in agent mode to prevent random screenshots)
+            let screenshotBase64: string | undefined = undefined;
+            if (!isAgentMode) {
+              screenshotBase64 = await takeAndSaveScreenshots("Desktop", stepFolder);
+              console.log('[MainHandlers] Screenshot captured, base64 length:', screenshotBase64?.length || 0);
+            } else {
+              console.log('[MainHandlers] 🚀 Agent mode: Skipping screenshot - will be handled by actions as needed');
+            }
             
             // Use the action agent to analyze the screen
             const streamGenerator = runActionAgentStreaming(
@@ -1252,9 +1266,14 @@ User: ${userPrompt}`;
           }
           
           try {
-            // Take screenshot for context
-            const screenshotBase64 = await takeAndSaveScreenshots("Desktop", stepFolder);
-            console.log('[MainHandlers] Screenshot captured for current app work, base64 length:', screenshotBase64?.length || 0);
+            // Take screenshot for context (skip in agent mode to prevent random screenshots)
+            let screenshotBase64: string | undefined = undefined;
+            if (!isAgentMode) {
+              screenshotBase64 = await takeAndSaveScreenshots("Desktop", stepFolder);
+              console.log('[MainHandlers] Screenshot captured for current app work, base64 length:', screenshotBase64?.length || 0);
+            } else {
+              console.log('[MainHandlers] 🚀 Agent mode: Skipping screenshot - will be handled by actions as needed');
+            }
             
             // Skip clickable elements in agent mode for speed
             let clickableElements: Element[] = [];

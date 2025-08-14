@@ -4,6 +4,7 @@ import { execPromise } from '../utils/utils';
 import * as path from 'path';
 import { app, screen } from 'electron';
 import OpenAI from 'openai';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 
 interface ActionResult {
   success: boolean;
@@ -22,6 +23,7 @@ interface ElementLocation {
 
 export class AgentVisionService {
   private openai: OpenAI;
+  private gemini: GoogleGenerativeAI;
   private maxRetries = 3;
   private screenshotDelay = 500; // ms to wait after actions before screenshot
 
@@ -29,6 +31,7 @@ export class AgentVisionService {
     this.openai = new OpenAI({
       apiKey: process.env.OPENAI_API_KEY
     });
+    this.gemini = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
   }
 
   /**
@@ -276,52 +279,157 @@ export class AgentVisionService {
   }
 
   /**
-   * Smart app opening with multiple strategies
+   * Hybrid app opening: GPT-4o dock coordinates + AppleScript fallback
    */
   async openApplication(appName: string): Promise<ActionResult> {
     console.log(`[AgentVision] Opening application: ${appName}`);
     
-    // Strategy 1: Check if app is already open
+    // Strategy 1: Check if already open (no screenshot needed)
     const isOpen = await this.isApplicationVisible(appName);
     if (isOpen) {
       return {
         success: true,
-        message: `${appName} is already open`
+        message: `${appName} is already open and visible`
       };
     }
 
-    // Strategy 2: Try Spotlight
-    const spotlightResult = await this.openViaSpotlight(appName);
-    if (spotlightResult.success) {
-      return spotlightResult;
+    // Strategy 2: Try Dock with GPT-4o coordinates
+    console.log(`[AgentVision] Looking for ${appName} on dock...`);
+    const screenshot = await this.takeScreenshot();
+    if (screenshot) {
+      const dockResult = await this.findAppOnDock(appName, screenshot);
+      
+      if (dockResult.found && dockResult.x && dockResult.y) {
+        console.log(`[AgentVision] Found ${appName} on dock, clicking at (${dockResult.x}, ${dockResult.y})`);
+        const cursor = getVirtualCursor();
+        await cursor.moveCursor({ x: dockResult.x, y: dockResult.y });
+        await new Promise(resolve => setTimeout(resolve, 200));
+        await cursor.performClick({ x: dockResult.x, y: dockResult.y });
+        await new Promise(resolve => setTimeout(resolve, 1500));
+        
+        return {
+          success: true,
+          message: `Opened ${appName} from dock`
+        };
+      }
     }
 
-    // Strategy 3: Try Dock
-    const dockResult = await this.openViaDock(appName);
-    if (dockResult.success) {
-      return dockResult;
-    }
-
-    // Strategy 4: Shell command fallback
+    // Strategy 3: AppleScript fallback (when not on dock)
+    console.log(`[AgentVision] ${appName} not found on dock, using AppleScript...`);
     try {
+      await execPromise(`osascript -e 'tell application "${appName}" to activate'`);
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      
+      return {
+        success: true,
+        message: `Opened ${appName} via AppleScript`
+      };
+    } catch (error) {
+      console.error(`[AgentVision] AppleScript failed:`, error);
+    }
+
+    // Strategy 4: Shell command final fallback
+    try {
+      console.log(`[AgentVision] Trying shell command for ${appName}...`);
       await execPromise(`open -a "${appName}"`);
       await new Promise(resolve => setTimeout(resolve, 2000));
       
-      const nowOpen = await this.isApplicationVisible(appName);
-      if (nowOpen) {
-        return {
-          success: true,
-          message: `Opened ${appName} via shell command`
-        };
-      }
+      return {
+        success: true,
+        message: `Opened ${appName} via shell command`
+      };
     } catch (error) {
-      console.error(`[AgentVision] Shell open failed:`, error);
+      console.error(`[AgentVision] Shell command failed:`, error);
     }
 
     return {
       success: false,
-      message: `Failed to open ${appName} using all strategies`
+      message: `Failed to open ${appName} - tried all methods`
     };
+  }
+
+  /**
+   * Hybrid approach: Ask Gemini if we need to open an app, then use GPT-4o for coordinates
+   */
+  async shouldOpenApp(userRequest: string): Promise<boolean> {
+    try {
+      const model = this.gemini.getGenerativeModel({ model: 'gemini-2.5-flash' });
+      const prompt = `User request: "${userRequest}"
+
+Does this request require opening a new application or software? 
+Consider if they're asking to:
+- Open/launch an app (Safari, Chrome, TextEdit, etc.)
+- Create something in a new app (presentation, document, etc.)
+- Use a specific program
+
+Respond with only: TRUE or FALSE`;
+
+      const result = await model.generateContent(prompt);
+      const response = result.response.text().trim().toUpperCase();
+      
+      console.log(`[AgentVision] Gemini decision for "${userRequest}": ${response}`);
+      return response === 'TRUE';
+    } catch (error) {
+      console.error('[AgentVision] Gemini decision error:', error);
+      return false; // Conservative fallback
+    }
+  }
+
+  /**
+   * Use GPT-4o to find app icon on dock and return coordinates
+   */
+  async findAppOnDock(appName: string, screenshotPath: string): Promise<{found: boolean, x?: number, y?: number}> {
+    try {
+      const fs = require('fs');
+      const imageData = fs.readFileSync(screenshotPath);
+      const base64Image = imageData.toString('base64');
+
+      const prompt = `Look at this macOS dock screenshot. Find the "${appName}" app icon on the dock. 
+If you find it, return coordinates where to click. If the app is NOT visible on the dock, return found: false.
+
+Respond with JSON only: {"found": true/false, "x": number, "y": number}`;
+
+      const response = await this.openai.chat.completions.create({
+        model: "gpt-4o",
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "text", text: prompt },
+              {
+                type: "image_url",
+                image_url: {
+                  url: `data:image/png;base64,${base64Image}`
+                }
+              }
+            ]
+          }
+        ],
+        max_tokens: 50,
+        temperature: 0.1
+      });
+
+      const responseText = response.choices[0]?.message?.content?.trim();
+      if (!responseText) {
+        return { found: false };
+      }
+
+      try {
+        const result = JSON.parse(responseText);
+        console.log(`[AgentVision] GPT-4o dock search for "${appName}":`, result);
+        return {
+          found: result.found || false,
+          x: result.x,
+          y: result.y
+        };
+      } catch (parseError) {
+        console.error('[AgentVision] Failed to parse GPT-4o dock response:', responseText);
+        return { found: false };
+      }
+    } catch (error) {
+      console.error('[AgentVision] GPT-4o dock search error:', error);
+      return { found: false };
+    }
   }
 
   private async isApplicationVisible(appName: string): Promise<boolean> {
