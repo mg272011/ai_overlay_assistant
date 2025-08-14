@@ -1081,8 +1081,11 @@ User: ${userPrompt}`;
         const needsApp = await agentVision.shouldOpenApp(userPrompt);
         if (needsApp) {
           console.log(`[MainHandlers] 🚀 Gemini says: App opening needed`);
-          appName = "Desktop"; // Agent will handle app opening with hybrid approach
+          // Extract app name from user prompt
+          const extractedApp = await agentVision.extractAppName(userPrompt);
+          appName = extractedApp || "Desktop";
           isOpenCommand = true;
+          console.log(`[MainHandlers] 🚀 Extracted app name: ${appName}`);
         } else {
           console.log(`[MainHandlers] 🚀 Gemini says: No app opening needed`);
           appName = "Desktop";

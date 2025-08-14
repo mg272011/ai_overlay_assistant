@@ -349,6 +349,36 @@ export class AgentVisionService {
   }
 
   /**
+   * Extract app name from user request using Gemini
+   */
+  async extractAppName(userRequest: string): Promise<string | null> {
+    try {
+      const model = this.gemini.getGenerativeModel({ model: 'gemini-2.5-flash' });
+      const prompt = `User request: "${userRequest}"
+
+Extract the application name that the user wants to open. Return ONLY the app name, nothing else.
+
+Examples:
+- "open safari" → Safari
+- "launch chrome" → Google Chrome  
+- "start textedit" → TextEdit
+- "open slack" → Slack
+- "launch photoshop" → Adobe Photoshop
+
+If no specific app is mentioned, return: NONE`;
+
+      const result = await model.generateContent(prompt);
+      const response = result.response.text().trim();
+      
+      console.log(`[AgentVision] Gemini extracted app name from "${userRequest}": ${response}`);
+      return response === 'NONE' ? null : response;
+    } catch (error) {
+      console.error('[AgentVision] App name extraction error:', error);
+      return null;
+    }
+  }
+
+  /**
    * Hybrid approach: Ask Gemini if we need to open an app, then use GPT-4o for coordinates
    */
   async shouldOpenApp(userRequest: string): Promise<boolean> {
