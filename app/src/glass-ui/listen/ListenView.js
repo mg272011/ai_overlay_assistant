@@ -26,7 +26,7 @@ export class ListenView extends LitElement {
       color: #fff;
       box-sizing: border-box;
       position: relative;
-      background: rgba(0, 0, 0, 0.2); /* Dark clear background */
+      background: rgba(0, 0, 0, 0.3); /* Dark clear background */
       overflow: hidden;
       border-radius: 12px;
       width: 100%;
@@ -74,7 +74,7 @@ export class ListenView extends LitElement {
     }
 
     .response-overlay::-webkit-scrollbar-track {
-      background: rgba(0, 0, 0, 0.2);
+      background: rgba(0, 0, 0, 0.3);
       border-radius: 3px;
     }
 

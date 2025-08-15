@@ -136,7 +136,7 @@ button, input, form, [onclick] {
 
 /* Dark clear background effect */
 .glass {
-  background: rgba(0, 0, 0, 0.2) !important;
+  background: rgba(0, 0, 0, 0.3) !important;
   border: none !important;
   color: white !important;
   pointer-events: auto !important;
@@ -144,7 +144,7 @@ button, input, form, [onclick] {
 
 /* Dark input bar for agents */
 .dark-input-bar {
-  background: rgba(0, 0, 0, 0.2) !important;
+  background: rgba(0, 0, 0, 0.3) !important;
   border: none !important;
   color: white !important;
   pointer-events: auto !important;
@@ -152,7 +152,7 @@ button, input, form, [onclick] {
 
 /* Dark input styling */
 .dark-input {
-  background: rgba(0, 0, 0, 0.2) !important;
+  background: rgba(0, 0, 0, 0.3) !important;
   border: none !important;
   color: white !important;
   pointer-events: auto !important;
@@ -167,12 +167,12 @@ button, input, form, [onclick] {
 
 .dark-input:focus {
   border: none !important;
-  background: rgba(0, 0, 0, 0.2) !important;
+  background: rgba(0, 0, 0, 0.3) !important;
 }
 
 /* Dark panel styling */
 .dark-panel {
-  background: rgba(0, 0, 0, 0.2) !important;
+  background: rgba(0, 0, 0, 0.3) !important;
   border: none !important;
   color: white !important;
   pointer-events: auto !important;
@@ -264,7 +264,7 @@ button, input, form, [onclick] {
 }
 
 .glass-message.user {
-  background: rgba(0, 0, 0, 0.2);
+  background: rgba(0, 0, 0, 0.3);
   border-color: rgba(255, 255, 255, 0.3);
   margin-left: auto;
   align-self: flex-end;
@@ -426,7 +426,7 @@ button, input, form, [onclick] {
 }
 
 .liquid-panel {
-  background: rgba(0, 0, 0, 0.2) !important;
+  background: rgba(0, 0, 0, 0.3) !important;
   border: none !important;
   border-radius: 16px;
   color: white !important;
@@ -537,7 +537,7 @@ button, input, form, [onclick] {
   position: relative;
   isolation: isolate;
   border-radius: var(--glass-radius);
-  box-shadow: 0px 6px var(--glass-outer-shadow-blur) rgba(0, 0, 0, 0.2);
+  box-shadow: 0px 6px var(--glass-outer-shadow-blur) rgba(0, 0, 0, 0.3);
 }
 
 .glass::before {
@@ -566,7 +566,7 @@ button, input, form, [onclick] {
 }
 /* Dark mainbar styling */
 .mainbar-glass {
-  background: rgba(0, 0, 0, 0.2) !important;
+  background: rgba(0, 0, 0, 0.3) !important;
   border: none !important;
   border-radius: 9999px; /* Keep pill shape for mainbar */
   color: white !important;
@@ -595,7 +595,7 @@ button, input, form, [onclick] {
 
 /* Input polish - dark theme */
 .glass-input { 
-  background: rgba(0, 0, 0, 0.2) !important;
+  background: rgba(0, 0, 0, 0.3) !important;
   border: none !important;
   color: white !important;
   pointer-events: auto !important;
@@ -605,7 +605,7 @@ button, input, form, [onclick] {
 }
 .glass-input:focus { 
   border: none !important;
-  background: rgba(0, 0, 0, 0.2) !important;
+  background: rgba(0, 0, 0, 0.3) !important;
 }
 
 /* Buttons used in suggestions (if re-enabled) */
@@ -621,11 +621,11 @@ button, input, form, [onclick] {
   -webkit-backdrop-filter: blur(10px) saturate(120%);
 }
 .glass-message.user { 
-  background: rgba(0, 0, 0, 0.2); 
+  background: rgba(0, 0, 0, 0.3); 
   border-color: rgba(255, 255, 255, 0.3); 
 }
 .glass-message.streaming { 
-  background: rgba(0, 0, 0, 0.2); 
+  background: rgba(0, 0, 0, 0.3); 
   border-color: rgba(255, 255, 255, 0.3); 
 }
 .glass-message.error { 
