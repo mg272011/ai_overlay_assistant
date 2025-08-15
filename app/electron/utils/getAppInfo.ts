@@ -1,5 +1,3 @@
-import { run } from "@openai/agents";
-import { appSelectionAgent } from "../ai/initAgents";
 import { execPromise, logWithElapsed } from "./utils";
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -84,26 +82,12 @@ export async function getAppName(userPrompt: string) {
       return best.app;
     }
   } catch (e) {
-    // Non-fatal; will fall back to LLM
+    // Non-fatal; will fall back to undefined
   }
 
-  // 3) LLM fallback for other tasks
-  const appNameResult = await run(appSelectionAgent, [
-    { role: "user", content: userPrompt },
-  ]);
-  logWithElapsed(
-    "getAppName",
-    `Result: ${
-      appNameResult.state._currentStep &&
-      "output" in appNameResult.state._currentStep
-        ? appNameResult.state._currentStep.output.trim()
-        : undefined
-    }`
-  );
-  return appNameResult.state._currentStep &&
-    "output" in appNameResult.state._currentStep
-    ? appNameResult.state._currentStep.output.trim()
-    : undefined;
+  // 3) No agent fallback - return undefined for unrecognized requests
+  logWithElapsed("getAppName", "No app match found - agent functionality removed");
+  return undefined;
 }
 
 export async function getBundleId(appName: string) {

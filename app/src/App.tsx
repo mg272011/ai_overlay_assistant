@@ -2,6 +2,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { startAudioStreaming, AudioStreamHandle } from "./lib/liveAudioStream";
 // Glass web components UI
 import "./glass-ui/listen/ListenView.js";
+  // Agent Components
+  import MacOSAgent from "./agents/MacOSAgent";
+  import ChromeAgent from "./agents/ChromeAgent";
 
 function App() {
   const [prompt, setPrompt] = useState("");
@@ -41,8 +44,12 @@ function App() {
   };
   const [meetingChats, setMeetingChats] = useState<MeetingChat[]>([]);
   
-  // Agent mode state (Regular vs Collab)
+  // Agent mode state - now controls browser agent
   const [agentMode, setAgentMode] = useState<"chat" | "agent">("chat");
+  const [isChromeActive, setIsChromeActive] = useState(false);
+  const [_agentSteps, setAgentSteps] = useState<string[]>([]);
+  const [_agentThinking, setAgentThinking] = useState<string>("");
+  const [_isAgentWorking, setIsAgentWorking] = useState(false);
   
   // Audio streaming state (Clonely-style)
   const audioHandleRef = useRef<AudioStreamHandle | null>(null);
@@ -206,15 +213,9 @@ function App() {
               if (highlightChatVisibleRef.current) {
                 // In highlight mode, use the same typewriter reveal as regular chat
                 setTypewriterFullText(messageContent);
-              } else if (agentMode === 'chat') {
+              } else {
                 // Use typewriter for chat mode instead of pasting immediately
                 setTypewriterFullText(messageContent);
-              } else {
-                setMessages((prev) => {
-                  const newMessage = { type: "assistant", message: messageContent };
-                  console.log('[App] Adding message to array:', newMessage);
-                  return [...prev, newMessage];
-                });
               }
               setCurrentStream("");
               currentStreamRef.current = "";
@@ -233,6 +234,29 @@ function App() {
         setTimeout(() => { if (inputRef.current) inputRef.current.focus(); }, 150);
       }, 100);
     });
+
+    // Listen for browser detection (keep logic but remove popup)
+    window.ipcRenderer.on("browser-detected", (_event: any, browserInfo: any) => {
+      console.log('[Browser Detection] Browser detected:', browserInfo);
+      // No popup - just log the detection
+    });
+
+    // Listen for browser command results  
+    window.ipcRenderer.on("browser-command-result", (_event: any, result: any) => {
+      console.log('[Browser Command] Result:', result);
+      
+      // Update agent steps display (BrowserOS style)
+      if (result.success) {
+        setAgentSteps(prev => [...prev, `✓ ${result.message}`]);
+      } else {
+        setAgentSteps(prev => [...prev, `✗ ${result.message}`]);
+      }
+      
+      setIsAgentWorking(false);
+      setAgentThinking("");
+    });
+
+
 
     // NEW: Listen for screen capture ready for prompt
     window.ipcRenderer.on(
@@ -309,12 +333,9 @@ function App() {
 
   // Show/hide virtual cursor based on mode
   useEffect(() => {
-    // Send toggle event to main process - this handles all virtual cursor management
-    window.ipcRenderer.send("toggle-collab-mode", agentMode === "agent");
-    
-    // Legacy show/hide cursor calls removed to prevent conflicts with toggle-collab-mode
+    // Agent mode removed - no collab mode toggle
     // The virtual cursor is now managed entirely through toggle-collab-mode
-  }, [agentMode]);
+  }, []);
 
   useEffect(() => {
     if (inputRef.current && isChatPaneVisible) {
@@ -403,6 +424,36 @@ function App() {
     },
     [prompt, isStreaming, agentMode, highlightChatVisible, highlightedImage, resumeContent, resumeFileName]
   );
+
+  // Check Chrome status when agent mode is activated
+  useEffect(() => {
+    if (agentMode === 'agent') {
+      console.log('[AgentMode] Checking Chrome status for agent...');
+      window.ipcRenderer.send('check-chrome-active');
+      
+      const handleChromeStatus = (_event: any, isActive: boolean) => {
+        console.log('[AgentMode] Chrome status received:', isActive);
+        setIsChromeActive(isActive);
+      };
+      
+      window.ipcRenderer.on('chrome-status', handleChromeStatus);
+      
+      return () => {
+        window.ipcRenderer.removeListener('chrome-status', handleChromeStatus);
+      };
+    }
+  }, [agentMode]);
+
+  // Notify main process when agent mode changes
+  useEffect(() => {
+    console.log('[AgentMode] State changed to:', agentMode);
+    // Log for debugging
+    if (agentMode === 'agent') {
+      console.log('[AgentMode] AGENT INPUT BAR SHOULD BE VISIBLE NOW');
+    } else {
+      console.log('[AgentMode] Agent input bar hidden');
+    }
+  }, [agentMode]);
 
   // Listen for live transcripts when in live mode
   useEffect(() => {
@@ -562,6 +613,14 @@ function App() {
       window.ipcRenderer.on("conversation-suggestion", handleSuggestion);
 
       return () => {
+        // FORCE stop any browser monitoring on component unmount
+        console.log('[App] Component unmounting, force stopping browser services');
+        try {
+          window.ipcRenderer.send("emergency-stop-monitoring");
+        } catch (error) {
+          console.error('[App] Error sending emergency stop:', error);
+        }
+        
         // Remove Glass JavaScript meeting event listeners
         window.ipcRenderer.removeListener("transcription-complete", handleGlassTranscriptionComplete);
         // stt-update cleanup handled by GlassMeetingView component
@@ -576,6 +635,8 @@ function App() {
         window.ipcRenderer.removeListener("gemini-transcript", handleGeminiTranscript);
         window.ipcRenderer.removeListener("conversation-transcript", handleLiveTranscript);
         window.ipcRenderer.removeListener("conversation-suggestion", handleSuggestion);
+        
+        // Keyboard listener cleanup handled within useEffect
       };
     }
   }, [isLiveMode]);
@@ -772,6 +833,25 @@ function App() {
     };
   }, []);
 
+  // Emergency stop keyboard shortcut (Cmd+Shift+X)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.metaKey && e.shiftKey && e.key === 'X') {
+        console.log('[App] Emergency stop shortcut triggered (Cmd+Shift+X)');
+        e.preventDefault();
+        window.ipcRenderer.send("emergency-stop-monitoring");
+        setAgentMode("chat");
+        alert('Emergency stop: All browser monitoring stopped');
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [setAgentMode]);
+
   // Close menu when clicking outside
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -836,9 +916,9 @@ function App() {
   }, [isStreaming, agentMode, typewriterFullText]);
 
   return (
-    <div className="w-full h-full flex flex-col items-center justify-start gap-1 pt-2 bg-transparent pointer-events-none">
+    <div className="w-full h-full flex flex-col items-center justify-start gap-1 pt-2 bg-transparent">
       {/* Clonely-style Mainbar */}
-      <div id="mainbar" className="glass mainbar-glass liquid-frost rounded-full font-sans flex-none w-[30vw] h-[6vh] max-w-[30vw] max-h-[6vh] px-3 pointer-events-auto app-region-drag" style={{ overflow: 'visible' }}>
+      <div id="mainbar" className="mainbar-glass rounded-full font-sans flex-none w-[30vw] h-[6vh] max-w-[30vw] max-h-[6vh] px-3 pointer-events-auto app-region-drag" style={{ overflow: 'visible' }}>
         {/* Draggable areas on the sides */}
         <div className="absolute left-0 top-0 w-8 h-full app-region-drag pointer-events-auto"></div>
         <div className="absolute right-0 top-0 w-8 h-full app-region-drag pointer-events-auto"></div>
@@ -858,7 +938,7 @@ function App() {
                 window.ipcRenderer.send("cancel-screen-highlight");
               }
               
-              setAgentMode("chat"); // Set to chat mode
+              // Agent mode removed - always chat mode
               const willOpen = !isChatPaneVisible;
               setIsChatPaneVisible(willOpen);
               setHighlightChatVisible(false); // Close highlight chat if open
@@ -905,41 +985,29 @@ function App() {
           {/* Draggable spacer */}
           <div className="w-2 h-full app-region-drag pointer-events-auto"></div>
 
-          {/* Agent button - matches Chat button style */}
+                    {/* Agent button - NanoBrowser integration */}
           <button
             type="button"
             onClick={(e) => {
               e.stopPropagation();
               e.preventDefault();
-              console.log('[Agent Button] Clicked! isChatPaneVisible:', isChatPaneVisible, 'agentMode:', agentMode);
+              console.log('[Agent Button] Clicked! Current mode:', agentMode);
               
-              // Close highlight mode if active
-              if (isHighlightMode) {
-                setIsHighlightMode(false);
-                setHighlightedImage(null);
-                window.ipcRenderer.send("cancel-screen-highlight");
-              }
-              
-              const willOpen = !(agentMode === "agent" && isChatPaneVisible);
-              setIsChatPaneVisible(willOpen);
-              setHighlightChatVisible(false); // Close highlight chat if open
-              if (willOpen) {
-                // Enter Agent mode and focus input
-                setAgentMode("agent");
-                window.ipcRenderer.send('chat:focus');
-                setTimeout(() => inputRef.current?.focus(), 100);
-              } else {
-                // Exiting Agent mode: switch back to chat and keep overlay interactive for quick reopen
+              // Simple toggle without any IPC calls that might cause issues
+              if (agentMode === "agent") {
+                console.log('[Agent Button] Closing NanoBrowser agent');
                 setAgentMode("chat");
-                // No blur here; keep focus state sticky for immediate reopen
+                setIsChatPaneVisible(false);
+              } else {
+                console.log('[Agent Button] Opening NanoBrowser agent');
+                setAgentMode("agent");
+                setIsChatPaneVisible(false);
               }
             }}
             className={`liquid-button inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md text-sm font-medium transition-all h-8 px-3 ${
-               agentMode === "agent" && isChatPaneVisible ? 'bg-secondary text-secondary-foreground shadow-xs' : 'hover:bg-accent hover:text-accent-foreground'
-             } ${
-               isStreaming && agentMode === "agent" ? 'bg-green-600 text-white shadow-xs animate-pulse' : ''
-             }`} data-active={agentMode === 'agent' && isChatPaneVisible}
-            title={agentMode === "agent" && isStreaming ? "Agent Working..." : "Open Agent Mode (Collaborative)"}
+              agentMode === "agent" ? 'bg-secondary text-secondary-foreground shadow-xs' : 'hover:bg-accent hover:text-accent-foreground'
+            }`}
+            title={agentMode === "agent" ? "NanoBrowser Agent Active" : "Activate NanoBrowser Agent (Chrome Required)"}
           >
             <span>Agent</span>
           </button>
@@ -1110,7 +1178,7 @@ function App() {
             {/* Debug: Menu state = {isMenuOpen ? 'OPEN' : 'CLOSED'} */}
             {isMenuOpen && (
               <div 
-                className="absolute right-0 top-[calc(100%+8px)] w-28 rounded-md glass liquid-panel shadow-xl pointer-events-auto"
+                className="absolute right-0 top-[calc(100%+8px)] w-28 rounded-md liquid-panel shadow-xl pointer-events-auto"
                 style={{ 
                   position: 'absolute',
                   pointerEvents: 'auto',
@@ -1132,13 +1200,13 @@ function App() {
                     window.ipcRenderer.send("minimize-window");
                     setIsMenuOpen(false);
                   }}
-                  className="w-full text-left px-3 py-2 text-xs text-white/90 flex items-center gap-2 transition-all hover:bg-white/10 rounded-md"
+                  className="w-full text-left px-3 py-2 text-xs text-white flex items-center gap-2 transition-all hover:bg-white/10 rounded-md"
                   title="Hide (⌘+⌫)"
                 >
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M18 3a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3H6a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3V6a3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3h12a3 3 0 0 0 3-3 3 3 0 0 0-3-3z"/>
                   </svg>
-                                     <span>Hide <span className="ml-1 text-[10px] text-white/50">⌘⌫</span></span>
+                                     <span>Hide <span className="ml-1 text-[10px] text-white">⌘⌫</span></span>
                 </button>
 
                 {/* Quit option */}
@@ -1150,7 +1218,7 @@ function App() {
                     window.close();
                     setIsMenuOpen(false);
                   }}
-                  className="w-full text-left px-3 py-2 text-xs text-white/90 flex items-center gap-2 transition-all hover:bg-white/10 rounded-md"
+                  className="w-full text-left px-3 py-2 text-xs text-white flex items-center gap-2 transition-all hover:bg-white/10 rounded-md"
                   title="Quit App"
                 >
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -1164,6 +1232,10 @@ function App() {
           </div>
         </div>
       </div>
+
+
+
+
 
       {/* AI Pane - Stays open when agent is working */}
       <div id="chat-pane" className={`overflow-hidden liquid-animate ${
@@ -1185,7 +1257,7 @@ function App() {
                 {meetingChats.map((chat) => (
                   <div 
                     key={chat.id} 
-                    className="glass liquid-panel rounded-lg p-3 relative action-chat-panel" 
+                    className="liquid-panel rounded-lg p-3 relative action-chat-panel" 
                     style={{ 
                       background: 'rgba(52, 199, 89, 0.1)',
                       backdropFilter: 'blur(8px) saturate(250%) contrast(150%) brightness(115%)',
@@ -1197,7 +1269,7 @@ function App() {
                       wordBreak: 'break-word'
                     }}>
                     <button
-                      className="absolute top-2 right-2 text-white/70 hover:text-white z-10"
+                      className="absolute top-2 right-2 text-white hover:text-white z-10"
                       onClick={() => setMeetingChats((prev) => prev.filter((c) => c.id !== chat.id))}
                       title="Close"
                     >
@@ -1226,7 +1298,7 @@ function App() {
                             <span className="inline-block w-0.5 h-4 bg-white ml-1 animate-pulse"></span>
                           </>
                         ) : (
-                          <div className="flex items-center gap-2 text-white/70">
+                          <div className="flex items-center gap-2 text-white">
                             <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                               <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2"></circle>
                               <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
@@ -1245,7 +1317,7 @@ function App() {
           {/* Highlight Chat Content (when active) - Same size as regular chat */}
             {highlightChatVisible && highlightedImage && (
               <div className="flex-1 flex flex-col h-full gap-2 min-w-0 text-sm max-h-[65vh] pointer-events-auto mx-auto" style={{ width: '420px', minWidth: '380px', maxWidth: '440px' }}>
-                <div className="flex-1 glass liquid-panel rounded-2xl flex flex-col overflow-hidden">
+                <div className="flex-1 liquid-panel rounded-2xl flex flex-col overflow-hidden">
                   {/* Header with close button */}
                   <div className="glass-chat-header px-4 pt-3 pb-2">
                     <div className="flex items-center justify-between">
@@ -1271,7 +1343,7 @@ function App() {
                           setMessages([]);
                           setCurrentStream("");
                         }}
-                        className="text-white/80 hover:text-white transition-colors p-1 rounded hover:bg-white/10"
+                        className="text-white hover:text-white transition-colors p-1 rounded hover:bg-white/10"
                         title="Close"
                       >
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -1287,14 +1359,14 @@ function App() {
                     {messages.map((msg, i) => (
                       <div
                         key={i}
-                        className={`mb-3 p-3 rounded-xl liquid-panel text-white/90`}
+                        className={`mb-3 p-3 rounded-xl liquid-panel text-white`}
                       >
                         <div className="whitespace-pre-wrap">{msg.message}</div>
                       </div>
                     ))}
 
                     {(isStreaming || currentStream) && (
-                      <div className="p-3 rounded-xl liquid-panel text-white/90">
+                      <div className="p-3 rounded-xl liquid-panel text-white">
                         <div className="font-semibold mb-1">
                           {isStreaming ? "Analyzing..." : "Response"}
                         </div>
@@ -1309,7 +1381,7 @@ function App() {
 
                     {/* Typewriter reveal in highlight mode */}
                     {!isStreaming && highlightChatVisible && typewriterText && (
-                      <div className="p-3 rounded-xl liquid-panel text-white/90">
+                      <div className="p-3 rounded-xl liquid-panel text-white">
                         <div className="font-semibold mb-1">Response</div>
                         <div className="whitespace-pre-wrap">{typewriterText}</div>
                       </div>
@@ -1333,7 +1405,7 @@ function App() {
                             inputRef.current.style.pointerEvents = 'auto';
                           }
                         }}
-                        className="glass-input pr-14 app-region-no-drag w-full"
+                        className="dark-input pr-14 app-region-no-drag w-full"
                       />
                       <div className="absolute right-4 top-1/2 -translate-y-1/2">
                         <div className="flex gap-2 items-center">
@@ -1352,13 +1424,13 @@ function App() {
             {/* Regular Chat/Command Content */}
           {!highlightChatVisible && !isLiveMode && (
             <div className="flex-1 flex flex-col h-full gap-2 min-w-0 text-sm max-h-[65vh] pointer-events-auto mx-auto" style={{ width: '420px', minWidth: '380px', maxWidth: '440px' }}>
-              <div className="flex-1 glass liquid-panel rounded-2xl flex flex-col overflow-hidden">
+              <div className="flex-1 liquid-panel rounded-2xl flex flex-col overflow-hidden">
                {/* Agent Status Bar with Mode Toggle */}
                <div className="glass-chat-header px-4 pt-3 pb-2">
                  <div className="flex items-center justify-between">
                    <div className="flex items-center gap-3">
-                     <span className="text-xs text-white/70">
-                       {agentMode === 'chat' ? 'Ask Mode' : 'Agent Mode'}
+                     <span className="text-xs text-white">
+                       Ask Mode
                      </span>
                    </div>
                    {/* Close button */}
@@ -1370,7 +1442,7 @@ function App() {
                          setCurrentStream("");
                          currentStreamRef.current = "";
                        }}
-                       className="text-white/80 hover:text-white transition-colors p-1 rounded hover:bg-white/10"
+                       className="text-white hover:text-white transition-colors p-1 rounded hover:bg-white/10"
                        title="Close chat"
                      >
                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -1384,19 +1456,19 @@ function App() {
                
                <div className="flex-1 p-4 overflow-y-auto text-sm leading-relaxed" style={{ maxHeight: 'calc(65vh - 120px)' }}>
                  {messages.map((msg, i) => (
-                   <div key={i} className={`mb-3 p-3 rounded-xl liquid-panel text-white/90`}>
+                   <div key={i} className={`mb-3 p-3 rounded-xl liquid-panel text-white`}>
                      <div className="font-semibold mb-1">{msg.type.charAt(0).toUpperCase() + msg.type.slice(1)}</div>
                      <div className="whitespace-pre-wrap">{msg.message}</div>
                    </div>
                  ))}
 
                  {(agentMode === 'chat' && !isStreaming && typewriterText) ? (
-                   <div className="p-3 rounded-xl liquid-panel text-white/90">
+                   <div className="p-3 rounded-xl liquid-panel text-white">
                      <div className="font-semibold mb-1">Response</div>
                      <div className="whitespace-pre-wrap">{typewriterText}</div>
                    </div>
                  ) : (isStreaming || currentStream) && (
-                   <div className="p-3 rounded-xl liquid-panel text-white/90">
+                   <div className="p-3 rounded-xl liquid-panel text-white">
                      <div className="font-semibold mb-1">{isStreaming ? "Thinking..." : "Response"}</div>
                      <div className="whitespace-pre-wrap">
                        {agentMode === 'chat' && isStreaming ? null : currentStream}
@@ -1419,19 +1491,19 @@ function App() {
                      onChange={(e) => setPrompt(e.target.value)}
                      placeholder={
                        isStreaming
-                         ? (agentMode === "chat" ? "Thinking..." : "Processing...")
-                         : agentMode === "agent"
+                                 ? "Thinking..."
+        : false
                          ? "Ask me to help you with complex tasks..."
                          : "Chat with me or ask about your screen..."
                      }
-                     disabled={isStreaming && agentMode !== "chat"}
+                     disabled={isStreaming}
                      onFocus={() => {
                        window.ipcRenderer.send('chat:focus');
                        if (inputRef.current) {
                          inputRef.current.style.pointerEvents = 'auto';
                        }
                      }}
-                     className="glass-input pr-14 app-region-no-drag w-full"
+                     className="dark-input pr-14 app-region-no-drag w-full"
                    />
                    <div className="absolute right-4 top-1/2 -translate-y-1/2">
                      <div className="flex gap-2 items-center">
@@ -1453,6 +1525,13 @@ function App() {
 
           </div>
         </div>
+
+        {/* Agent Input Bar - just the input bar */}
+        {agentMode === "agent" && (
+          <div className="mx-auto pointer-events-auto" style={{ width: '420px', minWidth: '380px', maxWidth: '440px' }}>
+            {isChromeActive ? <ChromeAgent /> : <MacOSAgent />}
+          </div>
+        )}
       </div>
   );
 }

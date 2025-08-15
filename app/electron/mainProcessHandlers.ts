@@ -1,24 +1,34 @@
 // @ts-ignore
 import { app, BrowserWindow, ipcMain, Notification, screen } from "electron";
+import OpenAI from 'openai';
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { getAppName, getBundleId } from "./utils/getAppInfo";
 import { getClickableElements } from "./utils/getClickableElements";
-import { runActionAgentStreaming } from "./ai/runAgents";
 import { takeAndSaveScreenshots } from "./utils/screenshots";
 import { execPromise, logWithElapsed } from "./utils/utils";
 import { performAction } from "./performAction";
-import { getVirtualCursor } from "./performAction";
-import runAppleScript from "./tools/appleScript";
-import key from "./tools/key";
-import { AgentInputItem } from "@openai/agents";
+// Removed unused imports: runAppleScript, key
 import { Element } from "./types";
-import { ConversationMonitor } from "./ai/conversationMonitor";
 import { LiveAudioService } from "./services/LiveAudioService";
-import { geminiVision } from "./services/GeminiVisionService";
+// Removed unused import: geminiVision
 import { initScreenHighlightService, getScreenHighlightService } from "./services/ScreenHighlightService";
 import { ContextualActionsService } from "./services/ContextualActionsService";
+import { browserDetection } from "./services/BrowserDetectionService";
 // import { ListenService } from "./services/glass/ListenService"; // Replaced by JavaScript version
+
+// Mock function to replace agent functionality
+async function* mockAgentStreaming() {
+  yield { type: "text", content: "Agent mode has been disabled. This functionality is no longer available." };
+}
+
+// OpenAI client for fallback
+let openaiClient: OpenAI | null = null;
+try {
+  openaiClient = new OpenAI();
+} catch (error) {
+  console.log('[MainHandlers] OpenAI client not available for fallback');
+}
 
 function createLogFolder(userPrompt: string) {
   logWithElapsed(
@@ -126,26 +136,11 @@ export function setupMainHandlers({ win }: { win: InstanceType<typeof BrowserWin
   mainWindow = win; // Store reference for IPC handlers
   
   // Lazy initialization - only create when needed to avoid startup freezes
-  let conversationMonitor: ConversationMonitor | null = null;
-    let liveAudioService: LiveAudioService | null = null;
+  let liveAudioService: LiveAudioService | null = null;
   // let glassListenService: ListenService | null = null; // Replaced by JavaScript version
   let glassJSListenService: any = null; // Glass JavaScript implementation for meeting/live
   let isGlassServiceInitializing = false; // Prevent concurrent initialization
   let contextualActionsSvc: ContextualActionsService | null = null;
-  
- 
-   
-  // Helper function to get or create conversation monitor
-  const getConversationMonitor = () => {
-    if (!conversationMonitor) {
-      conversationMonitor = new ConversationMonitor();
-      // Set up event forwarding only once when created
-      conversationMonitor.on("suggestion", ({ text, context }: { text: string; context?: any }) => {
-        win?.webContents.send("conversation-suggestion", { text, context });
-      });
-    }
-    return conversationMonitor;
-  };
   
   // Helper function to get or create live audio service  
   const getLiveAudioService = () => {
@@ -314,13 +309,12 @@ export function setupMainHandlers({ win }: { win: InstanceType<typeof BrowserWin
         const buffer = Buffer.from(chunk);
         
         // The audio is interleaved stereo PCM16 at 16kHz
-        // Channel 0 (left) = Microphone (user speaking)
-        // Channel 1 (right) = System audio (other person speaking)
-        
-        // Extract left channel (mic) and right channel (system)
-        const samples = buffer.length / 2; // 16-bit = 2 bytes per sample
-        const leftChannel = Buffer.alloc(buffer.length / 2);
-        const rightChannel = Buffer.alloc(buffer.length / 2);
+              // Channel 0 (left) = Microphone (user speaking)
+      // Channel 1 (right) = System audio (other person speaking)
+      
+      // Extract left channel (mic) and right channel (system)
+      const leftChannel = Buffer.alloc(buffer.length / 2);
+      const rightChannel = Buffer.alloc(buffer.length / 2);
         
         let leftIndex = 0;
         let rightIndex = 0;
@@ -353,12 +347,7 @@ export function setupMainHandlers({ win }: { win: InstanceType<typeof BrowserWin
   // Generate contextual actions on demand from renderer (e.g., per final turn)
   ipcMain.on('generate-contextual-actions', async (_evt, payload: { text: string; speaker: string }) => {
     try {
-      // If ConversationMonitor exists, let it handle and emit
-      if (conversationMonitor) {
-        conversationMonitor.updateAudioTranscript(payload.text, payload.speaker);
-        return;
-      }
-      // Fallback: use a lightweight service instance and emit directly
+      // Agent functionality removed - use lightweight service instance
       if (!contextualActionsSvc) contextualActionsSvc = new ContextualActionsService();
       contextualActionsSvc.addConversationTurn(payload.speaker, payload.text);
       const results = await contextualActionsSvc.generateContextualActions(payload.text, payload.speaker);
@@ -736,8 +725,8 @@ Be direct and concise. No bullet points, just flowing sentences.`;
   });
   
   ipcMain.on("audio-transcript", async (_, { transcript, speaker }) => {
-    const monitor = getConversationMonitor();
-    monitor.updateAudioTranscript(transcript, speaker);
+    // Agent functionality removed - conversation monitoring disabled
+    console.log(`Audio transcript received: [${speaker}] ${transcript}`);
   });
 
   // Additional Clonely-style handlers for live audio features
@@ -766,24 +755,16 @@ Be direct and concise. No bullet points, just flowing sentences.`;
     audioService.sendTextInput(text);
   });
   
-  // Add handler for mode toggling
+  // Add handler for mode toggling (simplified - no virtual cursor)
   ipcMain.on("toggle-collab-mode", async (_, isEnabled: boolean) => {
     try {
-      const cursor = getVirtualCursor();
-      
       if (isEnabled) {
-        // Show the virtual cursor for agent mode
-        console.log('[MainHandlers] Enabling collaborative mode - showing virtual cursor...');
-        await cursor.show();
-        console.log('[MainHandlers] ✅ Collaborative mode enabled - virtual cursor shown');
+        console.log('[MainHandlers] Agent mode enabled');
       } else {
-        // Hide the virtual cursor when leaving agent mode
-        console.log('[MainHandlers] Disabling collaborative mode - hiding virtual cursor...');
-        cursor.hide();
-        console.log('[MainHandlers] ✅ Collaborative mode disabled - virtual cursor hidden');
+        console.log('[MainHandlers] Agent mode disabled');
       }
     } catch (error) {
-      console.error('[MainHandlers] ❌ Error toggling collab mode:', error);
+      console.error('[MainHandlers] Error toggling mode:', error);
     }
   });
 
@@ -861,10 +842,15 @@ Be direct and concise. No bullet points, just flowing sentences.`;
         const imageBuffer = Buffer.from(options.highlightedImage, 'base64');
         fs.writeFileSync(imagePath, imageBuffer);
         
-        // Use GPT-5 to analyze the highlighted image with the user's prompt
-        const streamGenerator = runActionAgentStreaming(
-          "Desktop", 
-          `You are analyzing a highlighted/selected portion of a user's screen. The user asks: "${userPrompt}"
+        // Screen highlight analysis - use direct OpenAI call instead of removed agent streaming
+        const streamGenerator = async function* () {
+          try {
+            const OpenAI = (await import('openai')).default;
+            const openai = new OpenAI({
+              apiKey: process.env.OPENAI_API_KEY
+            });
+
+            const analysisPrompt = `You are analyzing a highlighted/selected portion of a user's screen. The user asks: "${userPrompt}"
 
 Please analyze the highlighted content and provide a helpful response. Consider:
 - What type of content this appears to be (code, text, UI, error message, documentation, etc.)
@@ -874,16 +860,34 @@ Please analyze the highlighted content and provide a helpful response. Consider:
 - If it's an error, suggest how to fix it
 - If it's documentation, summarize the key points
 
-Keep your response under 7 sentences maximum. Be conversational and helpful.`, 
-          [], // No clickable elements needed
-          [], // No history needed
-          options.highlightedImage, // Pass the image
-          timestampFolder,
-          async (_toolName: string, _args: string) => {
-            return "Analysis complete";
-          },
-          false // Not collaborative mode
-        );
+Keep your response under 7 sentences maximum. Be conversational and helpful.`;
+
+            const response = await openai.chat.completions.create({
+              model: "gpt-4o",
+              messages: [
+                {
+                  role: "user",
+                  content: [
+                    { type: "text", text: analysisPrompt },
+                    {
+                      type: "image_url",
+                      image_url: {
+                        url: `data:image/png;base64,${options.highlightedImage}`
+                      }
+                    }
+                  ]
+                }
+              ],
+              max_tokens: 500
+            });
+
+            const analysisText = response.choices[0]?.message?.content || "I couldn't analyze the highlighted content.";
+            yield { type: "text", content: analysisText };
+          } catch (error) {
+            console.error('[MainHandlers] Error in screen highlight analysis:', error);
+            yield { type: "text", content: "Sorry, I couldn't analyze the highlighted content due to an error." };
+          }
+        }();
         
         console.log('[MainHandlers] 🎯 Starting GPT-5 analysis stream...');
         
@@ -896,7 +900,7 @@ Keep your response under 7 sentences maximum. Be conversational and helpful.`,
             // Dynamically resize window for highlight responses
             resizeWindowForContent(highlightResponse.length);
           } else if (chunk.type === "tool_start") {
-            event.sender.send("stream", { type: "tool_start", toolName: chunk.toolName });
+            event.sender.send("stream", { type: "tool_start", toolName: (chunk as any).toolName });
           } else if (chunk.type === "tool_result") {
             event.sender.send("stream", { type: "tool_result", content: chunk.content });
           }
@@ -919,7 +923,8 @@ Keep your response under 7 sentences maximum. Be conversational and helpful.`,
     
     // Don't resize window - keep Clonely's fixed size
     logWithElapsed("setupMainHandlers", "message event received");
-    const isAgentMode = options?.mode === "agent";
+            // Agent mode removed - always false
+        const isAgentMode = false;
     const isChatMode = options?.mode === "chat";
     
     // FAST PATH: Handle Chat mode immediately (bypass app detection entirely)
@@ -1069,7 +1074,7 @@ User: ${userPrompt}`;
       console.log(`[MainHandlers] 🚀 Fast mode: Skipping pre-assessment, agent will handle navigation`);
     }
     
-    const history: AgentInputItem[] = [];
+            const history: any[] = [];
     let appName: string = "";
     let isOpenCommand = false;
     
@@ -1077,13 +1082,12 @@ User: ${userPrompt}`;
       // Fast path for agent mode - use hybrid app detection
       if (isAgentMode) {
         console.log(`[MainHandlers] 🚀 Agent mode: Using hybrid app detection`);
-        const { agentVision } = await import("./services/AgentVisionService");
-        const needsApp = await agentVision.shouldOpenApp(userPrompt);
+        // Agent functionality removed - skip app detection
+        console.log(`[MainHandlers] 🚀 Agent mode disabled - using default app detection`);
+        const needsApp = false;
         if (needsApp) {
-          console.log(`[MainHandlers] 🚀 Gemini says: App opening needed`);
-          // Extract app name from user prompt
-          const extractedApp = await agentVision.extractAppName(userPrompt);
-          appName = extractedApp || "Desktop";
+          console.log(`[MainHandlers] 🚀 App opening needed`);
+          appName = "Desktop";
           isOpenCommand = true;
           console.log(`[MainHandlers] 🚀 Extracted app name: ${appName}`);
         } else {
@@ -1179,20 +1183,8 @@ User: ${userPrompt}`;
               console.log('[MainHandlers] 🚀 Agent mode: Skipping screenshot - will be handled by actions as needed');
             }
             
-            // Use the action agent to analyze the screen
-            const streamGenerator = runActionAgentStreaming(
-              "Desktop",
-              userPrompt,
-              [], // No clickable elements needed for analysis
-              history,
-              screenshotBase64,
-              stepFolder,
-              async (_toolName: string, _args: string) => {
-                // For screen analysis, we don't need to execute tools
-                return "Analysis complete";
-              },
-              isAgentMode
-            );
+            // Agent functionality disabled - use mock response
+            const streamGenerator = mockAgentStreaming();
 
             // Stream the analysis response
             console.log('[MainHandlers] Starting to stream screen analysis...');
@@ -1292,45 +1284,8 @@ User: ${userPrompt}`;
               console.log(`[MainHandlers] 🚀 Agent mode: Skipping clickable elements for speed`);
             }
             
-            // Use the action agent with full context
-            const contextApp = mainApp;
-            const streamGenerator = runActionAgentStreaming(
-              contextApp,
-              userPrompt,
-              clickableElements,
-              history,
-              screenshotBase64,
-              stepFolder,
-              async (toolName: string, args: string) => {
-                // Execute tool call with proper arguments
-                const actionResult = await performAction(
-                  `=${toolName}\n${args}`,
-                  bundleIdForMainApp || contextApp,
-                  clickableElements,
-                  event,
-                  isAgentMode
-                );
-                
-                let resultText = "";
-                if (Array.isArray(actionResult)) {
-                  const firstResult = actionResult[0];
-                  if (firstResult && "type" in firstResult && (firstResult as any).type === "unknown tool") {
-                    resultText = "Error: unknown tool";
-                  } else if (firstResult && "error" in (firstResult as any) && (firstResult as any).error) {
-                    resultText = `Error: ${(firstResult as any).error}`;
-                  } else {
-                    resultText = "Action completed";
-                  }
-                } else if (actionResult && (actionResult as any).error) {
-                  resultText = `Error: ${(actionResult as any).error}`;
-                } else {
-                  resultText = "Action completed";
-                }
-                
-                return resultText;
-              },
-              isAgentMode
-            );
+            // Use mock agent response
+            const streamGenerator = mockAgentStreaming();
 
             // Stream the response
             console.log('[MainHandlers] Starting to stream current app interaction...');
@@ -1558,23 +1513,13 @@ Provide a friendly greeting that invites them to ask for help with tasks. Be wel
         console.log(`[MainHandlers] Collaborative mode: Using visual navigation to open ${appName}`);
         
         try {
-          // Show virtual cursor for the session
-          const cursor = getVirtualCursor();
-          await cursor.create();
-          await cursor.show();
-          
-          // Use the new hybrid app opening approach
-          await performAction(`=OpenApp\n${appName}`, "com.apple.desktop", [], event, true);
+          // Open app using simple AppleScript
+          await execPromise(`osascript -e 'tell application "${appName}" to activate'`);
       // For a simple open-only prompt, stop here — do not run the action agent
       if (isOpenOnlyPrompt) {
         return;
       }
-      // Otherwise, continue the original task with the agent inside the opened app
-          try {
-            await runAgentInApp(appName, userPrompt, history, event, isAgentMode);
-          } catch (e) {
-            console.warn('[MainHandlers] Post-open agent run failed:', e);
-          }
+      // Agent functionality removed
           return;
           
         } catch (error) {
@@ -1727,53 +1672,7 @@ Do NOT describe the screen. Do NOT add anything else. Just use the exact format 
         logWithElapsed("runActionAgent", `Image data length: ${screenshotBase64.length}`);
       }
       
-      const streamGenerator = runActionAgentStreaming(
-        contextApp,
-        agentPrompt,
-        clickableElements,
-        history,
-        screenshotBase64,
-        stepFolder,
-                      async (toolName: string, args: string) => {
-          // Execute tool call
-          const actionResult = await performAction(
-            `=${toolName}\n${args}`,
-            bundleId,
-            clickableElements,
-            event,
-            isAgentMode
-          );
-          
-          let resultText = "";
-          if (Array.isArray(actionResult)) {
-            // Handle array of results
-            const firstResult = actionResult[0];
-            if (firstResult && "type" in firstResult && firstResult.type === "unknown tool") {
-              resultText = "Error: unknown tool. Is the tool name separated from the arguments with a new line?";
-            } else if (firstResult && "error" in firstResult && firstResult.error) {
-              resultText = `Error:\n${firstResult.error}`;
-            } else if (firstResult && "stdout" in firstResult && firstResult.stdout) {
-              resultText = `Success. Stdout:\n${firstResult.stdout}`;
-            } else {
-              resultText = "Success";
-            }
-          } else {
-            // Handle single result
-            if ("type" in actionResult && actionResult.type === "unknown tool") {
-              resultText = "Error: unknown tool. Is the tool name separated from the arguments with a new line?";
-            } else if ("error" in actionResult && actionResult.error) {
-              resultText = `Error:\n${actionResult.error}`;
-            } else if ("stdout" in actionResult && actionResult.stdout) {
-              resultText = `Success. Stdout:\n${actionResult.stdout}`;
-            } else {
-              resultText = "Success";
-            }
-          }
-          
-          return resultText;
-        },
-        isAgentMode  // Only enable tools in agent mode, not in chat mode
-      );
+      const streamGenerator = mockAgentStreaming();
 
       // Stream tokens and handle tool calls
       for await (const chunk of streamGenerator) {
@@ -1788,23 +1687,9 @@ Do NOT describe the screen. Do NOT add anything else. Just use the exact format 
             resizeWindowForContent(action.length);
             break;
           case "tool_start":
-            event.sender.send("stream", {
-              type: "tool_start",
-              toolName: chunk.toolName
-            });
-            hasToolCall = true;
-            break;
           case "tool_args":
-            event.sender.send("stream", {
-              type: "tool_args",
-              content: chunk.content
-            });
-            break;
           case "tool_execute":
-            event.sender.send("stream", {
-              type: "tool_execute",
-              toolName: chunk.toolName
-            });
+            // Tool functionality disabled
             break;
           case "tool_result":
             event.sender.send("stream", {
@@ -1921,6 +1806,1004 @@ Do NOT describe the screen. Do NOT add anything else. Just use the exact format 
         win.setIgnoreMouseEvents(true, { forward: true } as any);
       }
     } catch {}
+  });
+
+  // Browser Agent Mode handlers
+  ipcMain.on("start-browser-monitoring", async (_event) => {
+    try {
+      console.log('[MainHandlers] Starting NanoBrowser agent mode');
+      
+      // For NanoBrowser, we just need to verify Chrome is active
+      // We don't need the overlay or continuous monitoring
+      const activeBrowser = await browserDetection.getActiveBrowser();
+      if (activeBrowser?.name === 'Google Chrome') {
+        console.log('[MainHandlers] Chrome is active, NanoBrowser agent ready');
+        mainWindow?.webContents.send('nanobrowser-ready', true);
+      } else {
+        console.log('[MainHandlers] Chrome not active');
+        mainWindow?.webContents.send('nanobrowser-ready', false);
+      }
+    } catch (error) {
+      console.error('[MainHandlers] Error starting NanoBrowser agent:', error);
+    }
+  });
+
+  ipcMain.on("stop-browser-monitoring", async (_event) => {
+    try {
+      console.log('[MainHandlers] Stopping NanoBrowser agent mode');
+      // For NanoBrowser, we don't have any services to stop
+      // Just log that we're closing
+    } catch (error) {
+      console.error('[MainHandlers] Error stopping NanoBrowser agent:', error);
+    }
+  });
+
+  // Emergency stop handler
+  ipcMain.on("emergency-stop-monitoring", async (_event) => {
+    try {
+      console.log('[MainHandlers] Emergency stop - Closing NanoBrowser agent');
+      // For NanoBrowser, just close the sidebar
+      mainWindow?.webContents.send('nanobrowser-closed', true);
+    } catch (error) {
+      console.error('[MainHandlers] Error in emergency stop:', error);
+    }
+  });
+
+  // Check if Chrome is active
+  ipcMain.on("check-chrome-active", async (event) => {
+    try {
+      const activeBrowser = await browserDetection.getActiveBrowser();
+      console.log('[MainHandlers] Active browser detected:', activeBrowser);
+      const isChromeActive = activeBrowser?.name === 'Google Chrome';
+      console.log('[MainHandlers] Is Chrome active?', isChromeActive);
+      event.reply("chrome-status", isChromeActive);
+    } catch (error) {
+      console.error('[MainHandlers] Error checking Chrome status:', error);
+      event.reply("chrome-status", false);
+    }
+  });
+
+  // Open Chrome browser
+  ipcMain.on("open-chrome", async (_event) => {
+    try {
+      await execPromise(`osascript -e 'tell application "Google Chrome" to activate'`);
+      // Try to create a new window if needed
+      try {
+        await execPromise(`osascript -e 'tell application "Google Chrome" to make new window'`);
+      } catch {
+        // Window creation might fail if Chrome is already open, that's ok
+      }
+      console.log('[MainHandlers] Chrome opened successfully');
+    } catch (error) {
+      console.error('[MainHandlers] Error opening Chrome:', error);
+    }
+  });
+
+  // Handle NanoBrowser commands
+  ipcMain.on("nanobrowser-command", async (event, command: string) => {
+    try {
+      console.log('[MainHandlers] NanoBrowser command received:', command);
+      
+      // For now, just echo back a response
+      // In production, this would process the command through the browser automation
+      setTimeout(() => {
+        const response = `I received your command: "${command}". Browser automation would execute here.`;
+        event.reply("nanobrowser-response", response);
+      }, 1000);
+    } catch (error) {
+      console.error('[MainHandlers] Error processing NanoBrowser command:', error);
+      event.reply("nanobrowser-response", `Error: ${error}`);
+    }
+  });
+
+  // Handle NanoBrowser stop
+  ipcMain.on("nanobrowser-stop", async (_event) => {
+    try {
+      console.log('[MainHandlers] NanoBrowser stop requested');
+      // Stop any ongoing browser automation
+    } catch (error) {
+      console.error('[MainHandlers] Error stopping NanoBrowser:', error);
+    }
+  });
+
+  // Intelligent Gemini-powered macOS command handler
+  ipcMain.on("gemini-macos-command", async (event, userInput: string) => {
+    try {
+      console.log('[MainHandlers] Processing Gemini macOS command:', userInput);
+      
+      // Quick check for obvious conversational inputs - skip Gemini for speed
+      const lowerInput = userInput.toLowerCase().trim();
+      const conversationalWords = ['hi', 'hello', 'hey', 'how are you', 'what\'s up', 'sup', 'howdy', 'greetings'];
+      
+      if (conversationalWords.some(word => lowerInput === word || lowerInput.startsWith(word))) {
+        console.log('[MainHandlers] Detected conversational input, using quick response');
+        event.reply('gemini-macos-response', {
+          type: 'conversation',
+          content: 'Hey there! 👋 Head over to Chat mode for conversations. I\'m your browser automation buddy - try "open google" or "new tab"!'
+        });
+        return;
+      }
+      
+      // Use Gemini to determine intent and generate response
+      const prompt = `You are a browser automation assistant for macOS. Your main job is to help with browser commands, not general conversation.
+
+User input: "${userInput}"
+
+Analyze this input and respond with JSON in this format:
+{
+  "type": "conversation" | "browser_action",
+  "response": "Your response to the user",
+  "applescript": "AppleScript commands if this is a browser action (optional)"
+}
+
+If it's casual conversation (like "hi", "hello", "how are you"), respond briefly but redirect them to Ask mode for chatting.
+If it's a browser command, provide both a response and the AppleScript commands.
+
+Browser actions you can handle:
+- "open google" -> Opens Google.com
+- "search for X" -> Searches Google for X  
+- "go back" -> Browser back button
+- "go forward" -> Browser forward button
+- "refresh" -> Refresh page
+- "new tab" -> Open new tab
+- "close tab" -> Close current tab
+
+Examples:
+- "hi" -> {"type": "conversation", "response": "Hi! I'm your browser automation assistant. For general chatting, please use Ask mode. I'm here to help with browser commands like 'open google' or 'search for something'."}
+- "how are you" -> {"type": "conversation", "response": "I'm doing well, thanks! For conversations, try Ask mode. I specialize in browser automation - try commands like 'new tab' or 'go back'."}
+- "open google" -> {"type": "browser_action", "response": "Opening Google for you!", "applescript": "tell application \\"System Events\\" to keystroke \\"l\\" using command down; delay 0.5; tell application \\"System Events\\" to keystroke \\"google.com\\"; delay 0.5; tell application \\"System Events\\" to key code 36"}`;
+
+      try {
+        console.log('[MainHandlers] Starting Gemini API call...');
+        
+        // Check if API key exists
+        const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
+        if (!apiKey) {
+          throw new Error('GEMINI_API_KEY or GOOGLE_API_KEY not found in environment variables');
+        }
+        console.log('[MainHandlers] API key found, length:', apiKey.length);
+        
+        // Use Gemini directly for text generation
+        const { GoogleGenerativeAI } = await import('@google/generative-ai');
+        const genAI = new GoogleGenerativeAI(apiKey);
+        const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+        
+        console.log('[MainHandlers] Sending prompt to Gemini...');
+        
+        // Add timeout to prevent hanging
+        const timeoutPromise = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Gemini API timeout after 3 seconds')), 3000)
+        );
+        
+        const result = await Promise.race([
+          model.generateContent(prompt),
+          timeoutPromise
+        ]) as any;
+        
+        const response = result.response.text();
+        console.log('[MainHandlers] Gemini response received:', response.substring(0, 100) + '...');
+        
+        try {
+          // Clean up response - remove markdown code blocks if present
+          let cleanResponse = response.trim();
+          if (cleanResponse.startsWith('```json')) {
+            cleanResponse = cleanResponse.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+          } else if (cleanResponse.startsWith('```')) {
+            cleanResponse = cleanResponse.replace(/^```\s*/, '').replace(/\s*```$/, '');
+          }
+          
+          const parsedResponse = JSON.parse(cleanResponse);
+          
+          // If it's a browser action with AppleScript, execute it
+          if (parsedResponse.type === 'browser_action' && parsedResponse.applescript) {
+            try {
+              // Split multiple commands and execute them
+              const commands = parsedResponse.applescript.split(';');
+              for (const cmd of commands) {
+                const trimmedCmd = cmd.trim();
+                if (trimmedCmd) {
+                  await execPromise(`osascript -e '${trimmedCmd}'`);
+                }
+              }
+              console.log('[MainHandlers] AppleScript executed successfully');
+            } catch (error) {
+              console.error('[MainHandlers] AppleScript execution failed:', error);
+              parsedResponse.response = `I tried to ${userInput.toLowerCase()}, but encountered an error: ${error}`;
+            }
+          }
+          
+          event.reply('gemini-macos-response', {
+            type: parsedResponse.type,
+            content: parsedResponse.response
+          });
+          
+        } catch (parseError) {
+          console.error('[MainHandlers] Failed to parse Gemini response:', parseError);
+          // Fallback: treat as conversation
+          event.reply('gemini-macos-response', {
+            type: 'conversation',
+            content: response || "I heard you, but I'm having trouble processing that request right now."
+          });
+        }
+             } catch (geminiError) {
+         console.error('[MainHandlers] Gemini API error:', geminiError);
+         console.log('[MainHandlers] Attempting OpenAI fallback...');
+         
+         // Try OpenAI as fallback
+         if (openaiClient) {
+           try {
+             const completion = await openaiClient.chat.completions.create({
+               model: 'gpt-4o-mini',
+               messages: [
+                 { 
+                   role: 'system', 
+                   content: `You are a browser automation assistant for macOS. Your main job is to help with browser commands, not general conversation.
+
+If it's casual conversation (like "hi", "hello", "how are you"), respond briefly but redirect them to Ask mode for chatting.
+If it's a browser command, provide both a response and the AppleScript commands.
+
+Browser actions you can handle:
+- "open google" -> Opens Google.com
+- "search for X" -> Searches Google for X  
+- "go back" -> Browser back button
+- "go forward" -> Browser forward button
+- "refresh" -> Refresh page
+- "new tab" -> Open new tab
+- "close tab" -> Close current tab
+
+Respond with JSON in this format:
+{
+  "type": "conversation" | "browser_action",
+  "response": "Your response to the user",
+  "applescript": "AppleScript commands if this is a browser action (optional)"
+}`
+                 },
+                 { role: 'user', content: userInput }
+               ],
+               max_tokens: 300,
+               temperature: 0.3
+             });
+             
+             const response = completion.choices[0]?.message?.content?.trim() || '';
+             console.log('[MainHandlers] OpenAI fallback response received');
+             
+             // Same JSON parsing logic as Gemini
+             let cleanResponse = response.trim();
+             if (cleanResponse.startsWith('```json')) {
+               cleanResponse = cleanResponse.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+             } else if (cleanResponse.startsWith('```')) {
+               cleanResponse = cleanResponse.replace(/^```\s*/, '').replace(/\s*```$/, '');
+             }
+             
+             const parsedResponse = JSON.parse(cleanResponse);
+             
+             // If it's a browser action with AppleScript, execute it
+             if (parsedResponse.type === 'browser_action' && parsedResponse.applescript) {
+               try {
+                 // Split multiple commands and execute them
+                 const commands = parsedResponse.applescript.split(';');
+                 for (const cmd of commands) {
+                   const trimmedCmd = cmd.trim();
+                   if (trimmedCmd) {
+                     await execPromise(`osascript -e '${trimmedCmd}'`);
+                   }
+                 }
+                 console.log('[MainHandlers] AppleScript executed successfully (OpenAI)');
+               } catch (error) {
+                 console.error('[MainHandlers] AppleScript execution failed:', error);
+                 parsedResponse.response = `I tried to ${userInput.toLowerCase()}, but encountered an error: ${error}`;
+               }
+             }
+             
+             event.reply('gemini-macos-response', {
+               type: parsedResponse.type,
+               content: parsedResponse.response
+             });
+             
+           } catch (openaiError) {
+             console.error('[MainHandlers] OpenAI fallback also failed:', openaiError);
+             
+             // Final fallback to static responses
+             const lowerInput = userInput.toLowerCase();
+             let fallbackResponse = '';
+             
+             if (lowerInput.includes('google')) {
+               fallbackResponse = 'I can help with that! Try: "open google" or "search for something"';
+             } else if (lowerInput.includes('search')) {
+               fallbackResponse = 'Try: "search for [your query]" and I\'ll open Google search for you.';
+             } else if (lowerInput.includes('tab')) {
+               fallbackResponse = 'I can help with tabs! Try: "new tab" or "close tab"';
+             } else {
+               fallbackResponse = 'I help with browser commands like "open google", "new tab", or "go back". For chatting, use Ask mode.';
+             }
+             
+             event.reply('gemini-macos-response', {
+               type: 'conversation',
+               content: fallbackResponse
+             });
+           }
+         } else {
+           // No OpenAI available, use static fallback
+           const lowerInput = userInput.toLowerCase();
+           let fallbackResponse = '';
+           
+           if (lowerInput.includes('google')) {
+             fallbackResponse = 'I can help with that! Try: "open google" or "search for something"';
+           } else if (lowerInput.includes('search')) {
+             fallbackResponse = 'Try: "search for [your query]" and I\'ll open Google search for you.';
+           } else if (lowerInput.includes('tab')) {
+             fallbackResponse = 'I can help with tabs! Try: "new tab" or "close tab"';
+           } else {
+             fallbackResponse = 'I help with browser commands like "open google", "new tab", or "go back". For chatting, use Ask mode.';
+           }
+           
+           event.reply('gemini-macos-response', {
+             type: 'conversation',
+             content: fallbackResponse
+           });
+         }
+       }
+      
+    } catch (error) {
+      console.error('[MainHandlers] Gemini macOS command failed:', error);
+      event.reply('gemini-macos-response', {
+        type: 'conversation', 
+        content: "Sorry, I'm having trouble processing your request right now. Please try again."
+      });
+    }
+  });
+
+  // AppleScript command handler (for when Chrome isn't active)
+  ipcMain.on("applescript-command", async (event, command: string) => {
+    try {
+      console.log('[MainHandlers] AppleScript command received:', command);
+      
+      // Parse the command and execute appropriate AppleScript
+      let response = '';
+      
+      if (command.toLowerCase().includes('open') && command.toLowerCase().includes('google')) {
+        // Open Google
+        await execPromise(`osascript -e 'tell application "System Events" to keystroke "l" using command down'`);
+        await execPromise(`osascript -e 'tell application "System Events" to keystroke "google.com"'`);
+        await execPromise(`osascript -e 'tell application "System Events" to key code 36'`); // Enter key
+        response = 'Opening Google.com';
+      } else if (command.toLowerCase().includes('search')) {
+        // Extract search query
+        const searchMatch = command.match(/search(?:\s+for)?\s+(.+)/i);
+        if (searchMatch) {
+          const query = searchMatch[1];
+          await execPromise(`osascript -e 'tell application "System Events" to keystroke "l" using command down'`);
+          await execPromise(`osascript -e 'tell application "System Events" to keystroke "https://google.com/search?q=${encodeURIComponent(query)}"'`);
+          await execPromise(`osascript -e 'tell application "System Events" to key code 36'`); // Enter key
+          response = `Searching for: ${query}`;
+        } else {
+          response = 'Please specify what to search for';
+        }
+      } else if (command.toLowerCase().includes('new tab')) {
+        // Open new tab
+        await execPromise(`osascript -e 'tell application "System Events" to keystroke "t" using command down'`);
+        response = 'Opened new tab';
+      } else if (command.toLowerCase().includes('close tab')) {
+        // Close current tab
+        await execPromise(`osascript -e 'tell application "System Events" to keystroke "w" using command down'`);
+        response = 'Closed current tab';
+      } else if (command.toLowerCase().includes('back')) {
+        // Go back
+        await execPromise(`osascript -e 'tell application "System Events" to keystroke "[" using command down'`);
+        response = 'Navigated back';
+      } else if (command.toLowerCase().includes('forward')) {
+        // Go forward
+        await execPromise(`osascript -e 'tell application "System Events" to keystroke "]" using command down'`);
+        response = 'Navigated forward';
+      } else if (command.toLowerCase().includes('refresh') || command.toLowerCase().includes('reload')) {
+        // Refresh page
+        await execPromise(`osascript -e 'tell application "System Events" to keystroke "r" using command down'`);
+        response = 'Page refreshed';
+      } else if (command.toLowerCase().includes('scroll')) {
+        // Scroll actions
+        if (command.toLowerCase().includes('down')) {
+          await execPromise(`osascript -e 'tell application "System Events" to key code 125'`); // Down arrow
+          response = 'Scrolled down';
+        } else if (command.toLowerCase().includes('up')) {
+          await execPromise(`osascript -e 'tell application "System Events" to key code 126'`); // Up arrow
+          response = 'Scrolled up';
+        } else {
+          response = 'Please specify scroll direction (up/down)';
+        }
+      } else {
+        // Default response for unrecognized commands
+        response = `I can help you with browser navigation using system commands. Try:
+- "Open Google"
+- "Search for [query]"
+- "New tab"
+- "Close tab"
+- "Go back/forward"
+- "Refresh page"
+- "Scroll up/down"`;
+      }
+      
+      event.reply("applescript-response", response);
+    } catch (error) {
+      console.error('[MainHandlers] Error executing AppleScript command:', error);
+      event.reply("applescript-response", `Error: ${error}`);
+    }
+  });
+
+  // Handle sidebar state changes
+  ipcMain.on("sidebar-state-changed", async (_event, data: { isOpen: boolean, width: number }) => {
+    try {
+      console.log('[MainHandlers] Sidebar state changed:', data);
+      // Browser resizing temporarily disabled to prevent crashes
+      // TODO: Re-enable with proper error handling and throttling
+    } catch (error) {
+      console.error('[MainHandlers] Error handling sidebar state change:', error);
+    }
+  });
+
+     // Enhanced browser automation function
+  // Commented out - not currently used
+  /*
+  async function executeComplexBrowserCommand(command: string, activeBrowser: any): Promise<{success: boolean, message: string}> {
+    const lowerCommand = command.toLowerCase();
+    
+    try {
+      // Complex multi-step automation like BrowserOS
+      
+      // Flight booking automation with smart parsing and real browser automation
+      if (lowerCommand.includes('book') && (lowerCommand.includes('flight') || lowerCommand.includes('plane') || lowerCommand.includes('trip'))) {
+        console.log('[BrowserOS Agent] Starting flight booking automation');
+        
+        // Extract details from the command
+        const destinationMatch = command.match(/to\s+([A-Za-z\s]+?)(?:\s+from|\s+on|\s+for|$)/i);
+        const originMatch = command.match(/from\s+([A-Za-z\s]+?)(?:\s+to|\s+on|\s+for|$)/i);
+        const dateMatch = command.match(/(tomorrow|next\s+\w+|today|\d{1,2}\/\d{1,2})/i);
+        
+        console.log('[BrowserOS Agent] Extracted details:', {
+          origin: originMatch?.[1],
+          destination: destinationMatch?.[1], 
+          date: dateMatch?.[1]
+        });
+        
+        let url = "https://www.google.com/travel/flights";
+        if (destinationMatch) {
+          const destination = destinationMatch[1].trim();
+          url += `?q=flights+to+${encodeURIComponent(destination)}`;
+        }
+        
+        console.log('[BrowserOS Agent] Opening Google Flights:', url);
+        await execPromise(`osascript -e 'tell application "${activeBrowser.name}" to open location "${url}"'`);
+        
+        // Real browser automation - wait for page load then interact with elements
+        setTimeout(async () => {
+          try {
+            console.log('[BrowserOS Agent] Starting flight booking automation...');
+            
+            // Simulate clicking and typing using AppleScript (basic automation)
+            if (originMatch) {
+              console.log(`[BrowserOS Agent] Setting departure: ${originMatch[1]}`);
+              // Focus on departure input and type
+              await execPromise(`osascript -e '
+                tell application "System Events"
+                  tell process "${activeBrowser.name}"
+                    click (text field 1 of group 1 of UI element 1 of scroll area 1 of group 1 of group 1 of tab group 1 of splitter group 1 of window 1)
+                    delay 0.5
+                    set the clipboard to "${originMatch[1]}"
+                    keystroke "v" using command down
+                    delay 1
+                    key code 36
+                  end tell
+                end tell'`);
+            }
+            
+            if (destinationMatch) {
+              console.log(`[BrowserOS Agent] Setting destination: ${destinationMatch[1]}`);
+              // Focus on destination input and type
+              await execPromise(`osascript -e '
+                tell application "System Events"
+                  tell process "${activeBrowser.name}"
+                    click (text field 2 of group 1 of UI element 1 of scroll area 1 of group 1 of group 1 of tab group 1 of splitter group 1 of window 1)
+                    delay 0.5
+                    set the clipboard to "${destinationMatch[1]}"
+                    keystroke "v" using command down
+                    delay 1
+                    key code 36
+                  end tell
+                end tell'`);
+            }
+            
+            if (dateMatch) {
+              console.log(`[BrowserOS Agent] Setting date: ${dateMatch[1]}`);
+              // This would interact with date picker
+            }
+            
+            console.log('[BrowserOS Agent] Flight booking form populated');
+          } catch (automationError) {
+            console.error('[BrowserOS Agent] Automation error:', automationError);
+            console.log('[BrowserOS Agent] Falling back to manual interaction');
+          }
+        }, 3000); // Wait 3 seconds for page to load
+        
+        return { success: true, message: `Opening Google Flights and automating booking${destinationMatch ? ` to ${destinationMatch[1]}` : ''}...` };
+      }
+      
+      // Hotel booking automation
+      if (lowerCommand.includes('book') && (lowerCommand.includes('hotel') || lowerCommand.includes('room') || lowerCommand.includes('stay'))) {
+        await execPromise(`osascript -e 'tell application "${activeBrowser.name}" to open location "https://www.booking.com"'`);
+        return { success: true, message: 'Opening Booking.com for hotel reservations...' };
+      }
+      
+      // Restaurant booking automation
+      if (lowerCommand.includes('book') && (lowerCommand.includes('restaurant') || lowerCommand.includes('table') || lowerCommand.includes('dinner'))) {
+        await execPromise(`osascript -e 'tell application "${activeBrowser.name}" to open location "https://www.opentable.com"'`);
+        return { success: true, message: 'Opening OpenTable for restaurant reservations...' };
+      }
+      
+      // Shopping automation - BrowserOS-style with history awareness
+      if (lowerCommand.includes('buy') || lowerCommand.includes('shop') || lowerCommand.includes('order')) {
+        const shoppingQuery = command.replace(/buy|shop|order/gi, '').trim();
+        
+        // Check for specific requests like "from my order history"
+        if (lowerCommand.includes('history') || lowerCommand.includes('again') || lowerCommand.includes('reorder')) {
+          await execPromise(`osascript -e 'tell application "${activeBrowser.name}" to open location "https://www.amazon.com/gp/your-account/order-history"'`);
+          
+          // Simulate agent searching in order history
+          setTimeout(async () => {
+            console.log('[BrowserOS Agent] Searching order history for:', shoppingQuery);
+            // In a real BrowserOS implementation, this would use page automation
+          }, 2000);
+          
+          return { success: true, message: `Searching your order history for: ${shoppingQuery}` };
+        } else {
+          await execPromise(`osascript -e 'tell application "${activeBrowser.name}" to open location "https://www.amazon.com/s?k=${encodeURIComponent(shoppingQuery)}"'`);
+          return { success: true, message: `Searching Amazon for: ${shoppingQuery}` };
+        }
+      }
+      
+      // Email automation
+      if (lowerCommand.includes('email') || lowerCommand.includes('send') || lowerCommand.includes('compose')) {
+        await execPromise(`osascript -e 'tell application "${activeBrowser.name}" to open location "https://mail.google.com/mail/u/0/#compose"'`);
+        return { success: true, message: 'Opening Gmail compose...' };
+      }
+      
+      // Social media automation
+      if (lowerCommand.includes('post') || lowerCommand.includes('tweet') || lowerCommand.includes('share')) {
+        await execPromise(`osascript -e 'tell application "${activeBrowser.name}" to open location "https://twitter.com/compose/tweet"'`);
+        return { success: true, message: 'Opening Twitter compose...' };
+      }
+      
+      // YouTube automation
+      if (lowerCommand.includes('watch') || lowerCommand.includes('video') || lowerCommand.includes('youtube')) {
+        const videoQuery = command.replace(/watch|video|youtube/gi, '').trim();
+        await execPromise(`osascript -e 'tell application "${activeBrowser.name}" to open location "https://www.youtube.com/results?search_query=${encodeURIComponent(videoQuery)}"'`);
+        return { success: true, message: `Searching YouTube for: ${videoQuery}` };
+      }
+      
+      // Calendar/schedule automation
+      if (lowerCommand.includes('schedule') || lowerCommand.includes('calendar') || lowerCommand.includes('meeting')) {
+        await execPromise(`osascript -e 'tell application "${activeBrowser.name}" to open location "https://calendar.google.com"'`);
+        return { success: true, message: 'Opening Google Calendar...' };
+      }
+      
+      // Document automation
+      if (lowerCommand.includes('document') || lowerCommand.includes('write') || lowerCommand.includes('doc')) {
+        await execPromise(`osascript -e 'tell application "${activeBrowser.name}" to open location "https://docs.google.com/document/create"'`);
+        return { success: true, message: 'Creating new Google Doc...' };
+      }
+      
+      // Weather automation
+      if (lowerCommand.includes('weather') || lowerCommand.includes('forecast')) {
+        const location = command.replace(/weather|forecast/gi, '').trim() || 'current location';
+        await execPromise(`osascript -e 'tell application "${activeBrowser.name}" to open location "https://www.google.com/search?q=weather+${encodeURIComponent(location)}"'`);
+        return { success: true, message: `Getting weather for: ${location}` };
+      }
+      
+      // News automation
+      if (lowerCommand.includes('news') || lowerCommand.includes('headlines')) {
+        await execPromise(`osascript -e 'tell application "${activeBrowser.name}" to open location "https://news.google.com"'`);
+        return { success: true, message: 'Opening Google News...' };
+      }
+      
+      // Advanced BrowserOS-style multi-step tasks
+      
+      // Fill forms automation
+      if (lowerCommand.includes('fill') && (lowerCommand.includes('form') || lowerCommand.includes('application'))) {
+        console.log('[BrowserOS Agent] Form filling request detected');
+        return { success: true, message: 'Ready to help fill forms. Click on the form field you want to start with.' };
+      }
+      
+      // Research automation - open multiple tabs
+      if (lowerCommand.includes('research') || lowerCommand.includes('compare')) {
+        const topic = command.replace(/research|compare/gi, '').trim();
+        
+        // Open multiple research sources
+        const sources = [
+          `https://www.google.com/search?q=${encodeURIComponent(topic)}`,
+          `https://en.wikipedia.org/wiki/${encodeURIComponent(topic.replace(/ /g, '_'))}`,
+          `https://scholar.google.com/scholar?q=${encodeURIComponent(topic)}`
+        ];
+        
+        for (const source of sources) {
+          await execPromise(`osascript -e 'tell application "${activeBrowser.name}" to open location "${source}"'`);
+          await new Promise(resolve => setTimeout(resolve, 500)); // Small delay between tabs
+        }
+        
+        return { success: true, message: `Opening research tabs for: ${topic}` };
+      }
+      
+      // Tab management automation
+      if (lowerCommand.includes('close') && lowerCommand.includes('tab')) {
+        if (lowerCommand.includes('all')) {
+          await execPromise(`osascript -e 'tell application "${activeBrowser.name}" to close every window'`);
+          return { success: true, message: 'Closed all tabs' };
+        } else {
+          await execPromise(`osascript -e 'tell application "${activeBrowser.name}" to close current tab of window 1'`);
+          return { success: true, message: 'Closed current tab' };
+        }
+      }
+      
+      // Download automation
+      if (lowerCommand.includes('download') || lowerCommand.includes('save')) {
+        const item = command.replace(/download|save/gi, '').trim();
+        console.log('[BrowserOS Agent] Download request for:', item);
+        // In BrowserOS, this would trigger download detection
+        return { success: true, message: `Ready to download: ${item}. Click on the download link when you find it.` };
+      }
+      
+      // Login automation
+      if (lowerCommand.includes('login') || lowerCommand.includes('sign in')) {
+        const service = command.match(/(google|github|facebook|twitter|linkedin|amazon)/i)?.[1] || 'website';
+        console.log('[BrowserOS Agent] Login assistance for:', service);
+        return { success: true, message: `Ready to help you login to ${service}. Navigate to the login page.` };
+      }
+      
+      // Extract/scrape data
+      if (lowerCommand.includes('extract') || lowerCommand.includes('scrape') || lowerCommand.includes('copy all')) {
+        console.log('[BrowserOS Agent] Data extraction request');
+        // In BrowserOS, this would trigger content extraction
+        return { success: true, message: 'Ready to extract data. Highlight the content you want to extract.' };
+      }
+      
+      // Summarize page content
+      if (lowerCommand.includes('summarize') || lowerCommand.includes('tldr')) {
+        console.log('[BrowserOS Agent] Page summarization request');
+        
+        // Get page content using AppleScript and analyze it
+        setTimeout(async () => {
+          try {
+            // Get page text content
+            const pageContentScript = `
+              tell application "${activeBrowser.name}"
+                tell active tab of window 1
+                  execute javascript "document.body.innerText"
+                end tell
+              end tell
+            `;
+            
+            const { stdout: pageText } = await execPromise(`osascript -e '${pageContentScript}'`);
+            
+            // In a real implementation, this would be sent to AI for summarization
+            console.log('[BrowserOS Agent] Page content extracted for summarization');
+            console.log('[BrowserOS Agent] Content length:', pageText.length);
+            
+            // Send page content to AI (placeholder - would use OpenAI API)
+            // const summary = await generateSummary(pageText);
+            
+          } catch (error) {
+            console.error('[BrowserOS Agent] Failed to extract page content:', error);
+          }
+        }, 1000);
+        
+        return { success: true, message: 'Analyzing page content for summary...' };
+      }
+      
+      // General task automation - catch-all for complex tasks
+      if (lowerCommand.includes('help me') || lowerCommand.includes('automate') || 
+          lowerCommand.includes('do this') || lowerCommand.includes('complete this')) {
+        console.log('[BrowserOS Agent] General automation request');
+        
+        // Real browser automation using AppleScript to interact with current page
+        setTimeout(async () => {
+          try {
+                      console.log('[BrowserOS Agent] Starting general page automation...');
+          
+          // Example: Take screenshot and analyze what's on screen
+          // Removed unused screenshotScript variable
+          
+          console.log('[BrowserOS Agent] Analyzing current page for automation opportunities...');
+            
+            // In a real BrowserOS implementation, this would:
+            // 1. Take screenshot of current page
+            // 2. Use AI vision to understand what's on screen
+            // 3. Plan and execute actions (clicking, typing, scrolling)
+            // 4. Provide feedback on progress
+            
+          } catch (error) {
+            console.error('[BrowserOS Agent] General automation error:', error);
+          }
+        }, 1000);
+        
+        return { success: true, message: 'Analyzing current page and planning automation...' };
+      }
+      
+          return { success: false, message: 'Unknown command' };
+    
+  } catch (error) {
+    console.error('[BrowserAutomation] Error executing complex command:', error);
+    return { success: false, message: `Error: ${error}` };
+  }
+}
+*/
+
+  ipcMain.on("browser-command", async (_event, command: string) => {
+    try {
+      console.log('[MainHandlers] Received browser command:', command);
+      
+      // Send immediate feedback to UI
+      mainWindow?.webContents.send('browser-command-result', {
+        success: true,
+        message: 'Processing command...'
+      });
+      
+      // First, check if user is asking to open a specific browser
+      const commandLower = command.toLowerCase();
+      const browserMap = {
+        'chrome': 'Google Chrome',
+        'google chrome': 'Google Chrome', 
+        'safari': 'Safari',
+        'firefox': 'Firefox',
+        'edge': 'Microsoft Edge',
+        'microsoft edge': 'Microsoft Edge',
+        'brave': 'Brave Browser',
+        'brave browser': 'Brave Browser',
+        'arc': 'Arc'
+      };
+      
+      let requestedBrowser = null;
+      if (commandLower.includes('open ')) {
+        for (const [key, fullName] of Object.entries(browserMap)) {
+          if (commandLower.includes(`open ${key}`)) {
+            requestedBrowser = fullName;
+            break;
+          }
+        }
+      }
+      
+      // Get active browser
+      let activeBrowser = await browserDetection.getActiveBrowser();
+      
+      // If user requested a specific browser, try to open it
+      if (requestedBrowser) {
+        try {
+          // First, activate the requested browser
+          await execPromise(`osascript -e 'tell application "${requestedBrowser}" to activate'`);
+          
+          // Then, try to create a new window if needed (simple approach)
+          try {
+            await execPromise(`osascript -e 'tell application "${requestedBrowser}" to make new window'`);
+          } catch (windowError) {
+            // If window creation fails, the browser is still activated - that's fine
+            console.log(`[MainHandlers] New window creation not needed/failed for ${requestedBrowser}, browser is activated`);
+          }
+          console.log(`[MainHandlers] Successfully activated and brought ${requestedBrowser} to foreground`);
+          
+          // Wait for browser to fully open and become active
+          await new Promise(resolve => setTimeout(resolve, 2000));
+          
+          // Update active browser
+          activeBrowser = await browserDetection.getActiveBrowser();
+          
+          mainWindow?.webContents.send('browser-command-result', {
+            success: true,
+            message: `Opened ${requestedBrowser}, executing command...`
+          });
+          // Continue to execute the original command instead of returning
+        } catch (error) {
+          mainWindow?.webContents.send('browser-command-result', {
+            success: false,
+            message: `Could not open ${requestedBrowser}. Please make sure it's installed.`
+          });
+          return;
+        }
+      }
+      
+      // If no specific browser requested and no browser is active, open default
+      if (!activeBrowser) {
+        console.log('[MainHandlers] No browser detected, opening default browser...');
+        
+        // Try to open browsers in order of preference (Chrome first as default)
+        const browsersToTry = [
+          'Google Chrome',  // DEFAULT: Always try Chrome first unless user specifies otherwise
+          'Safari', 
+          'Firefox',
+          'Microsoft Edge',
+          'Brave Browser',
+          'Arc'
+        ];
+        
+        let browserOpened = false;
+        for (const browserName of browsersToTry) {
+          try {
+            // First, activate the browser
+            await execPromise(`osascript -e 'tell application "${browserName}" to activate'`);
+            
+            // Then, try to create a new window if needed (simple approach)
+            try {
+              await execPromise(`osascript -e 'tell application "${browserName}" to make new window'`);
+            } catch (windowError) {
+              // If window creation fails, the browser is still activated - that's fine
+              console.log(`[MainHandlers] New window creation not needed/failed for ${browserName}, browser is activated`);
+            }
+            console.log(`[MainHandlers] Successfully activated and brought ${browserName} to foreground`);
+            browserOpened = true;
+            
+            // Wait for browser to fully open and become active
+            await new Promise(resolve => setTimeout(resolve, 2000));
+            
+            // Check if browser is now active
+            activeBrowser = await browserDetection.getActiveBrowser();
+            if (activeBrowser) {
+              mainWindow?.webContents.send('browser-command-result', {
+                success: true,
+                message: `Opened ${browserName}, executing command...`
+              });
+              break;
+            }
+          } catch (error) {
+            console.log(`[MainHandlers] ${browserName} not available, trying next...`);
+            continue;
+          }
+        }
+        
+        if (!browserOpened || !activeBrowser) {
+          mainWindow?.webContents.send('browser-command-result', {
+            success: false,
+            message: 'Could not open any browser. Please install Chrome, Safari, or another supported browser.'
+          });
+          return;
+        }
+      }
+      
+      // Use simple browser commands
+      console.log('[MainHandlers] Processing browser command');
+      
+             // Fallback: Parse and execute simple browser commands
+       const lowerCommand = command.toLowerCase();
+       let result = { success: false, message: 'Unknown command' };
+       
+       // Execute simple commands as fallback
+       {
+        if (lowerCommand.includes('search for') || lowerCommand.includes('google')) {
+          // Extract search query
+          const searchQuery = command.replace(/search for|google/gi, '').trim();
+          const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(searchQuery)}`;
+          
+          // Open search in browser
+          await execPromise(`osascript -e 'tell application "${activeBrowser.name}" to open location "${searchUrl}"'`);
+          result = { success: true, message: `Searching for: ${searchQuery}` };
+          
+        } else if (lowerCommand.includes('new tab')) {
+          await browserDetection.executeInBrowser(activeBrowser.name, 'new-tab');
+          result = { success: true, message: 'Opened new tab' };
+          
+        } else if (lowerCommand.includes('refresh') || lowerCommand.includes('reload')) {
+          await browserDetection.executeInBrowser(activeBrowser.name, 'refresh');
+          result = { success: true, message: 'Page refreshed' };
+          
+        } else if (lowerCommand.includes('back')) {
+          await browserDetection.executeInBrowser(activeBrowser.name, 'back');
+          result = { success: true, message: 'Navigated back' };
+          
+        } else if (lowerCommand.includes('forward')) {
+          await browserDetection.executeInBrowser(activeBrowser.name, 'forward');
+          result = { success: true, message: 'Navigated forward' };
+          
+        } else if (lowerCommand.includes('go to') || lowerCommand.includes('open')) {
+          // Extract URL (only for non-browser apps since browsers are handled above)
+          const urlMatch = command.match(/(?:go to|open)\s+(.+)/i);
+          if (urlMatch) {
+            let url = urlMatch[1].trim();
+            // Add https:// if not present
+            if (!url.startsWith('http://') && !url.startsWith('https://')) {
+              url = 'https://' + url;
+            }
+            await execPromise(`osascript -e 'tell application "${activeBrowser.name}" to open location "${url}"'`);
+            result = { success: true, message: `Navigating to: ${url}` };
+          }
+          
+        } else if (lowerCommand.includes('click')) {
+          // Extract what to click and attempt real clicking automation
+          const clickTarget = command.replace(/click/gi, '').trim();
+          console.log(`[MainHandlers] Attempting to click: ${clickTarget}`);
+          
+          // Real click automation using AppleScript
+          setTimeout(async () => {
+            try {
+              console.log(`[BrowserOS Agent] Searching for clickable element: ${clickTarget}`);
+              
+              // Attempt to find and click elements by various methods
+              const clickScript = `
+                tell application "System Events"
+                  tell process "${activeBrowser.name}"
+                    try
+                      -- Try to find button with text
+                      click (button whose title contains "${clickTarget}" or description contains "${clickTarget}")
+                    on error
+                      try
+                        -- Try to find link with text  
+                        click (UI element whose title contains "${clickTarget}" or description contains "${clickTarget}")
+                      on error
+                        -- Try to find any UI element with the text
+                        click (first UI element whose value contains "${clickTarget}")
+                      end try
+                    end try
+                  end tell
+                end tell
+              `;
+              
+              await execPromise(`osascript -e '${clickScript}'`);
+              console.log(`[BrowserOS Agent] Successfully clicked: ${clickTarget}`);
+              
+            } catch (error) {
+              console.error(`[BrowserOS Agent] Failed to click ${clickTarget}:`, error);
+              console.log('[BrowserOS Agent] You may need to click manually or be more specific');
+            }
+          }, 1000);
+          
+          result = { success: true, message: `Searching for and clicking: ${clickTarget}` };
+          
+        } else if (lowerCommand.includes('type') || lowerCommand.includes('enter') || lowerCommand.includes('fill')) {
+          // Extract what to type
+          const typeMatch = command.match(/(?:type|enter|fill)\s+(.+)/i);
+          if (typeMatch) {
+            const textToType = typeMatch[1].trim();
+            console.log(`[MainHandlers] Typing: ${textToType}`);
+            
+            // Real typing automation
+            setTimeout(async () => {
+              try {
+                const typeScript = `
+                  tell application "System Events"
+                    tell process "${activeBrowser.name}"
+                      keystroke "${textToType}"
+                    end tell
+                  end tell
+                `;
+                
+                await execPromise(`osascript -e '${typeScript}'`);
+                console.log(`[BrowserOS Agent] Typed: ${textToType}`);
+                
+              } catch (error) {
+                console.error('[BrowserOS Agent] Failed to type:', error);
+              }
+            }, 500);
+            
+            result = { success: true, message: `Typing: ${textToType}` };
+          } else {
+            result = { success: false, message: 'Please specify what to type' };
+          }
+          
+        } else {
+          // Try to interpret as a direct URL
+          if (command.includes('.')) {
+            let url = command.trim();
+            if (!url.startsWith('http://') && !url.startsWith('https://')) {
+              url = 'https://' + url;
+            }
+            await execPromise(`osascript -e 'tell application "${activeBrowser.name}" to open location "${url}"'`);
+            result = { success: true, message: `Navigating to: ${url}` };
+          }
+        }
+      }
+      
+      mainWindow?.webContents.send('browser-command-result', result);
+      
+    } catch (error) {
+      console.error('[MainHandlers] Error executing browser command:', error);
+      mainWindow?.webContents.send('browser-command-result', {
+        success: false,
+        message: 'Failed to execute command: ' + error
+      });
+    }
   });
 
   // NEW: Screen Highlighting handlers
@@ -2048,294 +2931,9 @@ Do NOT describe the screen. Do NOT add anything else. Just use the exact format 
 
 // Monitoring functions removed - screenshots now taken on-demand only
 
-  // Visual navigation function for collaborative mode - NEW SPOTLIGHT-BASED APPROACH
-async function performVisualNavigation(appName: string, cursor: ReturnType<typeof getVirtualCursor>, event: any) {
-  console.log(`[VisualNav] Starting Spotlight-based navigation to open ${appName}`);
+  // Visual navigation and dock click functions removed - agent mode disabled
 
-  // Early exit: if app already frontmost, treat as success
-  if (await isAppFrontmost(appName)) {
-    console.log(`[VisualNav] ${appName} already frontmost — goal achieved`);
-    return;
-  }
-
-    // STREAMLINED SPOTLIGHT NAVIGATION WITH RAPID JSON RESPONSES
-  try {
-    console.log(`[VisualNav] 🚀 Using streamlined Spotlight approach for ${appName}`);
-    
-    // Step 1: Ensure cursor is visible
-    await cursor.show();
-    
-    // Step 2: Open Spotlight with key command (no AppleScript in agent mode)
-    console.log(`[VisualNav] Opening Spotlight with key command...`);
-    await key("^cmd+space", "com.apple.finder", { noAppleScriptFallback: true });
-    await new Promise(resolve => setTimeout(resolve, 800));
-    
-    // Step 3: Take quick screenshot and get JSON response for input bar coordinates
-    console.log(`[VisualNav] 📸 Taking rapid screenshot to find Spotlight input bar...`);
-    const { GeminiVisionService } = await import("./services/GeminiVisionService");
-    const visionService = new GeminiVisionService();
-    const timestampFolder = createLogFolder(`spotlight-${Date.now()}`);
-    
-    const screenshot = await takeAndSaveScreenshots("Desktop", timestampFolder);
-    
-    if (screenshot) {
-              // More accurate prompt for finding the input field
-        const inputResult = await visionService.analyzeScreenForElement(
-          screenshot,
-          "Find the Spotlight search window - it's a floating search bar with rounded corners, usually centered horizontally and in the upper third of the screen. Look for the text input field area (not icons or labels). The input field is the white/light area where text can be typed, usually with placeholder text. Return the coordinates of the CENTER of this text input area where a cursor would appear when clicked. Return JSON: {\"found\": true/false, \"x\": <center x of input field>, \"y\": <center y of input field>}"
-        );
-      
-      if (inputResult.found && inputResult.x && inputResult.y) {
-        console.log(`[VisualNav] 👁️ Vision found Spotlight input at (${inputResult.x}, ${inputResult.y})`);
-        await cursor.moveCursor({ x: inputResult.x, y: inputResult.y });
-        await new Promise(resolve => setTimeout(resolve, 200));
-        await cursor.performClick({ x: inputResult.x, y: inputResult.y });
-      } else {
-        // Fallback to typical Spotlight position
-        const display = screen.getPrimaryDisplay();
-        const inputX = Math.floor(display.bounds.width / 2);
-        const inputY = Math.floor(display.bounds.height * 0.15);
-        console.log(`[VisualNav] Using fallback Spotlight input position at (${inputX}, ${inputY})`);
-        await cursor.moveCursor({ x: inputX, y: inputY });
-        await new Promise(resolve => setTimeout(resolve, 200));
-        await cursor.performClick({ x: inputX, y: inputY });
-      }
-    }
-    
-    // Step 4: Type the app name
-    await new Promise(resolve => setTimeout(resolve, 500));
-    console.log(`[VisualNav] Typing "${appName}" into Spotlight...`);
-    await key(appName, "com.apple.Spotlight", { noAppleScriptFallback: true });
-    await new Promise(resolve => setTimeout(resolve, 800));
-    
-    // Step 5: Take rapid screenshot and get JSON response for app icon coordinates
-    console.log(`[VisualNav] 📸 Taking rapid screenshot to find ${appName} icon...`);
-    const screenshot2 = await takeAndSaveScreenshots("Desktop", timestampFolder);
-    
-    if (screenshot2) {
-      const appResult = await visionService.analyzeScreenForElement(
-        screenshot2,
-        `Find the "${appName}" application in the Spotlight search results. Look for the app name "${appName}" with its icon in the search results list below the input field. Return coordinates to click on this specific app result.`
-      );
-      
-      if (appResult.found && appResult.x && appResult.y) {
-        console.log(`[VisualNav] 👁️ Vision found ${appName} at (${appResult.x}, ${appResult.y})`);
-        await cursor.moveCursor({ x: appResult.x, y: appResult.y });
-        await new Promise(resolve => setTimeout(resolve, 200));
-        await cursor.performClick({ x: appResult.x, y: appResult.y });
-      } else {
-        // Fallback to first result
-              const display = screen.getPrimaryDisplay();
-        const resultX = Math.floor(display.bounds.width / 2);
-        const resultY = Math.floor(display.bounds.height * 0.25);
-        console.log(`[VisualNav] Using fallback first result position at (${resultX}, ${resultY})`);
-        await cursor.moveCursor({ x: resultX, y: resultY });
-            await new Promise(resolve => setTimeout(resolve, 200));
-        await cursor.performClick({ x: resultX, y: resultY });
-      }
-    }
-    
-    // Step 6: Wait for app to launch
-              await new Promise(resolve => setTimeout(resolve, 1000));
-    
-    // Step 5: Verify the app opened successfully
-    let opened = false;
-    for (let i = 0; i < 6; i++) {
-              if (await isAppFrontmost(appName) || await isAppVisible(appName)) {
-        console.log(`[VisualNav] ✅ ${appName} opened successfully via Spotlight!`);
-        opened = true;
-                break;
-              }
-      console.log(`[VisualNav] Waiting for ${appName} to fully load... (${i + 1}/6)`);
-      await new Promise(r => setTimeout(r, 500));
-    }
-    
-    if (opened) {
-      event.sender.send("reply", {
-        type: "success",
-        message: `${appName} opened successfully via Spotlight search!`,
-      });
-      return;
-        } else {
-      console.log(`[VisualNav] ⚠️ ${appName} may have opened but not detected as frontmost`);
-      // Continue to fallback methods
-    }
-    
-  } catch (error) {
-    console.error(`[VisualNav] ❌ Spotlight approach failed:`, error);
-    // Continue to fallback methods
-  }
-
-  // FALLBACK: Try dock method if Spotlight fails
-  console.log(`[VisualNav] Trying fallback Dock approach for ${appName}...`);
-  const directDockClicked = await clickDockItemIfAvailable(appName, cursor);
-  if (directDockClicked) {
-    // Verify app opened
-        for (let i = 0; i < 5; i++) {
-          if (await isAppFrontmost(appName) || await isAppVisible(appName)) {
-        console.log(`[VisualNav] ${appName} opened via fallback Dock click!`);
-        return;
-          }
-          await new Promise(r => setTimeout(r, 300));
-        }
-  }
-
-  // Final fallback: Use shell open command
-  console.log(`[VisualNav] All visual methods failed, trying shell 'open' command...`);
-  try {
-    await execPromise(`open -a "${appName}"`);
-    
-    // Wait and verify the app opened
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    for (let i = 0; i < 5; i++) {
-      if (await isAppFrontmost(appName) || await isAppVisible(appName)) {
-        console.log(`[VisualNav] ✅ ${appName} opened successfully via native fallback!`);
-    event.sender.send("reply", {
-      type: "success",
-          message: `${appName} opened successfully!`,
-        });
-        return;
-      }
-      await new Promise(r => setTimeout(r, 500));
-    }
-    
-    console.log(`[VisualNav] ❌ Failed to open ${appName} with all methods`);
-    event.sender.send("reply", {
-      type: "error",
-      message: `Could not open ${appName}. Please ensure the app is installed.`,
-    });
-    } catch (nativeErr) {
-    console.error(`[VisualNav] Native fallback failed:`, nativeErr);
-      event.sender.send("reply", {
-        type: "error",
-      message: `Could not open ${appName}. Please ensure the app is installed.`,
-      });
-  }
-
-  console.log(`[VisualNav] 🎯 Spotlight-based navigation session ended`);
-}
-
-// Helper: Try to click Dock item via Accessibility (no hardcoded coords)
-async function clickDockItemIfAvailable(appName: string, cursor: ReturnType<typeof getVirtualCursor>): Promise<boolean> {
-  try {
-    console.log(`[AX] Attempting to resolve Dock item for ${appName}`);
-    const resolved = await geminiVision.getDockItemFrame(appName);
-    console.log(`[AX] Resolved Dock item result:`, resolved);
-    if (resolved.error === 'AccessibilityNotTrusted') {
-      // Notify renderer to show a permission prompt
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('permission-warning', {
-          type: 'accessibility',
-          message: 'Enable Accessibility permissions for Opus to click the Dock reliably. Open System Settings → Privacy & Security → Accessibility, then add and enable Opus.'
-        });
-      }
-    }
-    if (resolved.found && typeof resolved.centerX === 'number' && typeof resolved.centerY === 'number') {
-      const x = resolved.centerX!;
-      const y = resolved.centerY!;
-      console.log(`[VisualNav] [AX] Dock item resolved for ${appName} at (${x}, ${y}) — clicking`);
-      await cursor.moveCursor({ x, y });
-      await new Promise(r => setTimeout(r, 200));
-      await cursor.performClick({ x, y });
-      await new Promise(r => setTimeout(r, 300));
-      // Only activate if not already frontmost to avoid minimize flicker
-      if (!(await isAppFrontmost(appName))) {
-        await execPromise(`open -a "${appName}"`);
-        await new Promise(r => setTimeout(r, 700));
-      }
-      return true;
-    }
-  } catch (e) {
-    console.warn(`[VisualNav] [AX] Dock item resolve failed for ${appName}:`, e);
-  }
-  return false;
-}
-
-// Run the general action agent inside a target app
-async function runAgentInApp(
-  appName: string,
-  userPrompt: string,
-  history: AgentInputItem[],
-  event: any,
-  isAgentMode: boolean
-): Promise<void> {
-  let bundleIdForMainApp = "";
-  try {
-    bundleIdForMainApp = await getBundleId(appName);
-    console.log(`[MainHandlers] 🔗 Resolved bundle id for ${appName}: ${bundleIdForMainApp}`);
-  } catch (e) {
-    console.warn(`[MainHandlers] ⚠️ Could not resolve bundle id for ${appName}:`, e);
-  }
-
-  const mainLogFolder = createLogFolder(userPrompt);
-  const stepTimestamp = Date.now().toString();
-  const stepFolder = path.join(mainLogFolder, `${stepTimestamp}`);
-  if (!fs.existsSync(stepFolder)) {
-    fs.mkdirSync(stepFolder, { recursive: true });
-  }
-
-  try {
-    const screenshotBase64 = await takeAndSaveScreenshots("Desktop", stepFolder);
-    console.log('[MainHandlers] Screenshot captured for agent task, base64 length:', screenshotBase64?.length || 0);
-
-    let clickableElements: Element[] = [];
-    if (bundleIdForMainApp) {
-      try {
-        const result = await getClickableElements(bundleIdForMainApp, stepFolder);
-        clickableElements = result.clickableElements;
-        console.log(`[MainHandlers] Found ${clickableElements.length} clickable elements in ${appName}`);
-      } catch (error) {
-        console.warn(`[MainHandlers] Could not get clickable elements for ${appName}:`, error);
-      }
-    }
-
-    const streamGenerator = runActionAgentStreaming(
-      appName,
-      userPrompt,
-      clickableElements,
-      history,
-      screenshotBase64,
-      stepFolder,
-      async (toolName: string, args: string) => {
-        const actionResult = await performAction(
-          `=${toolName}\n${args}`,
-          bundleIdForMainApp || appName,
-          clickableElements,
-          event,
-          isAgentMode
-        );
-        let resultText = "";
-        if (Array.isArray(actionResult)) {
-          const first = actionResult[0] as any;
-          if (first?.error) resultText = `Error: ${first.error}`; else resultText = "Action completed";
-        } else if ((actionResult as any)?.error) {
-          resultText = `Error: ${(actionResult as any).error}`;
-        } else {
-          resultText = "Action completed";
-        }
-        return resultText;
-      },
-      isAgentMode
-    );
-
-    console.log('[MainHandlers] Starting to stream agent task...');
-    for await (const chunk of streamGenerator) {
-      if (chunk.type === "text") {
-        event.sender.send("stream", { type: "text", content: chunk.content });
-      } else if ((chunk as any).type === "done") {
-        event.sender.send("stream", { type: "stream_end", content: (chunk as any).content });
-        return;
-      }
-    }
-    console.log('[MainHandlers] Agent task stream complete');
-  } catch (error) {
-    console.error('[MainHandlers] Error during agent task in app:', error);
-    event.sender.send("reply", {
-      type: "error",
-      message: "Failed to complete task: " + error
-    });
-  }
-}
+// runAgentInApp function removed - agent mode disabled
 
 async function isAppFrontmost(appName: string): Promise<boolean> {
   try {
@@ -2406,10 +3004,10 @@ function buildPlanForTask(prompt: string): PlanStep[] | null {
 async function executePlan(
   plan: PlanStep[],
   event: any,
-  history: AgentInputItem[],
-  isAgentMode: boolean
+  _history: any[],
+  _isAgentMode: boolean
 ) {
-  const cursor = getVirtualCursor();
+  // Virtual cursor functionality removed
   for (const step of plan) {
     console.log(`[Plan] Executing step ${step.id}: ${step.title}`);
     if (step.check?.type === 'app_frontmost') {
@@ -2421,21 +3019,17 @@ async function executePlan(
     if (step.action === 'open_app') {
       let appName = (step.params?.appName as string) || 'Safari';
       if (appName === 'Google Chrome') { appName = await resolvePreferredBrowser(); }
-      await cursor.show();
-      await performAction(`=OpenApp\n${appName}`, "com.apple.desktop", [], event, true);
+      await performAction(`=OpenApp\n${appName}`, "com.apple.desktop", [], event);
       let ok = false; for (let i = 0; i < 6; i++) { if (await isAppFrontmost(appName) || await isAppVisible(appName)) { ok = true; break; } await new Promise(r => setTimeout(r, 300)); }
       console.log(`[Plan] Step ${step.id} ${ok ? 'completed' : 'pending'}`);
     } else if (step.action === 'navigate_url') {
       const url = step.params?.url as string;
       const browser = (await isAppFrontmost('Google Chrome')) ? 'Google Chrome' : (await isAppFrontmost('Safari') ? 'Safari' : await resolvePreferredBrowser());
-      try { await runAgentInApp(browser, `Focus the address bar then navigate to ${url}`, history, event, isAgentMode); } catch {}
-      try { await performAction('=Key\n^cmd+l', browser, [], event, isAgentMode); await performAction(`=Key\n${url} ^enter`, browser, [], event, isAgentMode); } catch {}
+      try { await performAction('=Key\n^cmd+l', browser, [], event); await performAction(`=Key\n${url} ^enter`, browser, [], event); } catch {}
       let ok = false; for (let i = 0; i < 8; i++) { if (await browserUrlContains(step.check?.value || '')) { ok = true; break; } await new Promise(r => setTimeout(r, 400)); }
       console.log(`[Plan] Step ${step.id} ${ok ? 'completed' : 'pending'}`);
     } else if (step.action === 'agent') {
-      const appName = (step.params?.appName as string) || 'Desktop';
-      const prompt = (step.params?.prompt as string) || '';
-      try { await runAgentInApp(appName, prompt, history, event, isAgentMode); console.log(`[Plan] Step ${step.id} completed`); } catch (e) { console.log(`[Plan] Step ${step.id} error:`, e); }
+      console.log(`[Plan] Step ${step.id} skipped - agent functionality disabled`);
     }
   }
 }

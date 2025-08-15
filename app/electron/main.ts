@@ -17,6 +17,8 @@ import fs from "node:fs";
 import { setupMainHandlers } from "./mainProcessHandlers.ts";
 // import { execFile } from "node:child_process"; // Unused
 import os from "node:os";
+import { browserDetection } from "./services/BrowserDetectionService";
+import { browserOverlay } from "./services/BrowserOverlayService";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -106,10 +108,18 @@ function createWindow() {
 }
 
 app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") {
+  // Stop browser monitoring and overlay services
+  try {
+    browserDetection.forceStop(); // Use forceStop for immediate cleanup
+    browserOverlay.forceStop();
+    console.log('[Main] Stopped browser services on window close');
+  } catch (error) {
+    console.error('[Main] Error stopping browser services:', error);
+  }
+  
+  // Always quit the app when window is closed (even on macOS)
     app.quit();
     win = null;
-  }
 });
 
 app.on("activate", () => {
@@ -171,8 +181,78 @@ app.whenReady().then(() => {
   for (const acc of accelerators) {
     try { globalShortcut.register(acc, toggleHide); } catch {}
   }
+  
+  // Register CMD+Q for immediate quit on macOS
+  if (process.platform === 'darwin') {
+    try { 
+      globalShortcut.register('Command+Q', () => {
+        console.log('[Main] CMD+Q pressed, quitting immediately');
+        browserDetection.forceStop();
+        browserOverlay.forceStop();
+        app.quit();
+      });
+    } catch {}
+  }
 });
 
 app.on('will-quit', () => {
+  // Stop browser monitoring and overlay services
+  try {
+    browserDetection.stopMonitoring();
+    browserOverlay.stopOverlay();
+    console.log('[Main] Stopped browser services on app quit');
+  } catch (error) {
+    console.error('[Main] Error stopping browser services on quit:', error);
+  }
+  
   try { globalShortcut.unregisterAll(); } catch {}
+});
+
+// Handle force kills (Ctrl+C, terminal kill, etc.)
+process.on('SIGINT', () => {
+  console.log('[Main] Received SIGINT, force stopping all services...');
+  try {
+    // Use force stop methods for immediate shutdown
+    browserDetection.forceStop();
+    browserOverlay.forceStop();
+  } catch (error) {
+    console.error('[Main] Error force stopping services on SIGINT:', error);
+  }
+  console.log('[Main] Force shutdown complete');
+  process.exit(0);
+});
+
+process.on('SIGTERM', () => {
+  console.log('[Main] Received SIGTERM, force stopping all services...');
+  try {
+    // Use force stop methods for immediate shutdown
+    browserDetection.forceStop();
+    browserOverlay.forceStop();
+  } catch (error) {
+    console.error('[Main] Error force stopping services on SIGTERM:', error);
+  }
+  console.log('[Main] Force shutdown complete');
+  process.exit(0);
+});
+
+// Add additional cleanup handlers
+process.on('exit', () => {
+  console.log('[Main] Process exit, final cleanup...');
+  try {
+    browserDetection.forceStop();
+    browserOverlay.forceStop();
+  } catch (error) {
+    // Ignore errors during final cleanup
+  }
+});
+
+process.on('uncaughtException', (error) => {
+  console.error('[Main] Uncaught exception, force stopping services:', error);
+  try {
+    browserDetection.forceStop();
+    browserOverlay.forceStop();
+  } catch (e) {
+    // Ignore cleanup errors
+  }
+  process.exit(1);
 });

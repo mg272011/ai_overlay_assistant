@@ -26,7 +26,7 @@ export class ListenView extends LitElement {
       color: #fff;
       box-sizing: border-box;
       position: relative;
-      background: linear-gradient(135deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0.05) 50%, rgba(255, 255, 255, 0.15) 100%); /* Liquid glass like mainbar */
+      background: rgba(0, 0, 0, 0.2); /* Dark clear background */
       overflow: hidden;
       border-radius: 12px;
       width: 100%;

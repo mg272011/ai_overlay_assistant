@@ -134,13 +134,48 @@ button, input, form, [onclick] {
   -webkit-app-region: no-drag;
 }
 
-/* Clonely-style glass effect - now with liquid glass like mainbar */
+/* Dark clear background effect */
 .glass {
-  background: linear-gradient(135deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0.05) 50%, rgba(255, 255, 255, 0.15) 100%) !important;
-  border: 0.5px solid rgba(255, 255, 255, 0.3) !important;
-  backdrop-filter: blur(20px) saturate(180%) contrast(120%) brightness(110%) hue-rotate(5deg) !important;
-  -webkit-backdrop-filter: blur(20px) saturate(180%) contrast(120%) brightness(110%) hue-rotate(5deg) !important;
-  box-shadow: 0 8px 32px rgba(31, 38, 135, 0.15), 0 4px 16px rgba(255, 255, 255, 0.1) inset, inset 0 2px 0 rgba(255, 255, 255, 0.6), inset 0 -2px 0 rgba(255, 255, 255, 0.2), inset 0 0 20px 10px rgba(255, 255, 255, 0.08) !important;
+  background: rgba(0, 0, 0, 0.2) !important;
+  border: none !important;
+  color: white !important;
+  pointer-events: auto !important;
+}
+
+/* Dark input bar for agents */
+.dark-input-bar {
+  background: rgba(0, 0, 0, 0.2) !important;
+  border: none !important;
+  color: white !important;
+  pointer-events: auto !important;
+}
+
+/* Dark input styling */
+.dark-input {
+  background: rgba(0, 0, 0, 0.2) !important;
+  border: none !important;
+  color: white !important;
+  pointer-events: auto !important;
+  padding: 12px 16px !important;
+  border-radius: 24px !important;
+  outline: none !important;
+}
+
+.dark-input::placeholder {
+  color: white !important;
+}
+
+.dark-input:focus {
+  border: none !important;
+  background: rgba(0, 0, 0, 0.2) !important;
+}
+
+/* Dark panel styling */
+.dark-panel {
+  background: rgba(0, 0, 0, 0.2) !important;
+  border: none !important;
+  color: white !important;
+  pointer-events: auto !important;
 }
 
 /* Glass Chat UI - Liquid glass effect like mainbar */
@@ -229,8 +264,8 @@ button, input, form, [onclick] {
 }
 
 .glass-message.user {
-  background: linear-gradient(135deg, rgba(0, 122, 255, 0.2) 0%, rgba(0, 122, 255, 0.15) 50%, rgba(0, 122, 255, 0.25) 100%);
-  border-color: rgba(0, 122, 255, 0.4);
+  background: rgba(0, 0, 0, 0.2);
+  border-color: rgba(255, 255, 255, 0.3);
   margin-left: auto;
   align-self: flex-end;
 }
@@ -267,7 +302,7 @@ button, input, form, [onclick] {
 }
 
 .glass-input::placeholder {
-  color: rgba(255, 255, 255, 0.6);
+  color: white;
 }
 
 .glass-input:focus {
@@ -306,7 +341,7 @@ button, input, form, [onclick] {
   align-items: center;
   justify-content: center;
   height: 200px;
-  color: rgba(255, 255, 255, 0.6);
+  color: white;
   font-size: 14px;
   font-style: italic;
   text-align: center;
@@ -391,44 +426,24 @@ button, input, form, [onclick] {
 }
 
 .liquid-panel {
-  background: var(--glass-bg) !important;
-  border: 0.5px solid var(--glass-border-soft) !important;
-  border-radius: var(--glass-radius);
-  backdrop-filter: blur(20px) saturate(180%) contrast(120%) brightness(110%) hue-rotate(5deg) !important;
-  -webkit-backdrop-filter: blur(20px) saturate(180%) contrast(120%) brightness(110%) hue-rotate(5deg) !important;
-  box-shadow: var(--glass-shadow) !important;
+  background: rgba(0, 0, 0, 0.2) !important;
+  border: none !important;
+  border-radius: 16px;
+  color: white !important;
+  pointer-events: auto !important;
   position: relative;
 }
 
-/* Subtle glossy stroke */
+/* Remove liquid panel effects */
 .liquid-panel::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  padding: 1px;
-  background: linear-gradient(160deg, rgba(255,255,255,0.22), rgba(255,255,255,0.06), rgba(255,255,255,0.22));
-  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-  mask-composite: exclude;
-  pointer-events: none;
+  display: none;
 }
 
-/* Water-like shimmer */
 .liquid-panel::before {
-  content: "";
-  position: absolute;
-  inset: -2px;
-  border-radius: inherit;
-  background:
-    radial-gradient(120% 80% at 15% 10%, rgba(255,255,255,0.06), rgba(255,255,255,0) 60%),
-    radial-gradient(110% 70% at 85% 90%, rgba(255,255,255,0.05), rgba(255,255,255,0) 60%);
-  mix-blend-mode: overlay;
-  pointer-events: none;
-  animation: rippleFloat 6s ease-in-out infinite alternate;
+  display: none;
 }
 
-@keyframes rippleFloat { from { transform: translateY(0); } to { transform: translateY(2px); } }
+/* Removed rippleFloat animation */
 
 /* Frost enhancement for mainbar */
 .liquid-frost {
@@ -441,7 +456,7 @@ button, input, form, [onclick] {
   background: transparent;
   border: none;
   border-radius: var(--button-radius);
-  color: rgba(255,255,255,0.95);
+  color: white;
   transition: color 0.18s ease, opacity 0.18s ease;
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
@@ -502,38 +517,19 @@ button, input, form, [onclick] {
 
 @keyframes pulseGlow { 0%, 100% { opacity: 0.45; transform: scale(0.98); } 50% { opacity: 0.9; transform: scale(1.02); } }
 
-/* Open/close motion for panes - smoother close */
+/* Simplified show/hide classes */
 .liquid-animate { 
-  will-change: transform, opacity, max-height; 
-  transform-origin: top center; 
-  transition: all 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94); /* Smoother easing */
+  transition: opacity 0.2s ease;
 }
 .liquid-open { 
-  transform: translateY(0) scale(1); 
-  opacity: 1; 
-  max-height: 70vh;
+  opacity: 1;
   pointer-events: auto;
   visibility: visible;
-  animation: slideDown 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
 }
 .liquid-closed { 
-  transform: translateY(-8px) scale(0.97); 
-  opacity: 0; 
-  max-height: 0;
+  opacity: 0;
   pointer-events: none;
   visibility: hidden;
-  overflow: hidden;
-  animation: slideUp 0.35s cubic-bezier(0.55, 0.055, 0.675, 0.19);
-}
-
-@keyframes slideDown {
-  from { transform: translateY(-8px) scale(0.97); opacity: 0; }
-  to { transform: translateY(0) scale(1); opacity: 1; }
-}
-
-@keyframes slideUp {
-  from { transform: translateY(0) scale(1); opacity: 1; }
-  to { transform: translateY(-8px) scale(0.97); opacity: 0; }
 }
 
 /* 🪄 Enhanced Liquid Glass Effect */
@@ -568,48 +564,22 @@ button, input, form, [onclick] {
   isolation: isolate;
   pointer-events: none;
 }
-/* 🪄 Main bar - Enhanced Liquid Glass with Pill Shape */
+/* Dark mainbar styling */
 .mainbar-glass {
-  position: relative;
-  isolation: isolate;
+  background: rgba(0, 0, 0, 0.2) !important;
+  border: none !important;
   border-radius: 9999px; /* Keep pill shape for mainbar */
-  border: 0.25px solid rgba(255, 255, 255, 0.3) !important;
-  box-shadow: 0px 8px var(--glass-outer-shadow-blur) rgba(31, 38, 135, 0.15);
-  overflow: hidden;
-  transform: translateZ(0);
-  will-change: transform;
+  color: white !important;
+  pointer-events: auto !important;
+  position: relative;
 }
 
 .mainbar-glass::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  border-radius: inherit;
-  box-shadow: 
-    inset 0 0 var(--glass-inner-shadow-blur) var(--glass-inner-shadow-spread) var(--glass-inner-shadow-color),
-    inset 0 2px 0 rgba(255, 255, 255, 0.6),
-    inset 0 -2px 0 rgba(255, 255, 255, 0.2),
-    inset 0 0 20px 10px rgba(255, 255, 255, 0.08);
-  background: linear-gradient(135deg, 
-    rgba(var(--glass-tint-color), 0.1) 0%,
-    rgba(var(--glass-tint-color), 0.05) 50%,
-    rgba(var(--glass-tint-color), 0.15) 100%);
-  pointer-events: none;
+  display: none;
 }
 
 .mainbar-glass::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  z-index: -1;
-  border-radius: inherit;
-  backdrop-filter: blur(var(--glass-frost-blur)) saturate(180%) contrast(120%) brightness(110%) hue-rotate(5deg);
-  -webkit-backdrop-filter: blur(var(--glass-frost-blur)) saturate(180%) contrast(120%) brightness(110%) hue-rotate(5deg);
-  /* filter: url(#glass-distortion); - Temporarily disabled */
-  /* -webkit-filter: url("#glass-distortion"); - Temporarily disabled */
-  isolation: isolate;
-  pointer-events: none;
+  display: none;
 }
 
 /* Removed shimmer animation that was causing glare */
@@ -623,17 +593,19 @@ button, input, form, [onclick] {
 /* Subheader strip for highlight chats */
 .liquid-subheader { background: rgba(255,255,255,0.02); border-bottom: 1px solid rgba(255,255,255,0.14); }
 
-/* Input polish - subtle liquid glass */
+/* Input polish - dark theme */
 .glass-input { 
-  background: linear-gradient(135deg, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0.04) 50%, rgba(255, 255, 255, 0.1) 100%); 
-  border: 0.5px solid rgba(255, 255, 255, 0.25); 
-  color: #ffffff; 
-  backdrop-filter: blur(10px) saturate(150%);
-  -webkit-backdrop-filter: blur(10px) saturate(150%);
+  background: rgba(0, 0, 0, 0.2) !important;
+  border: none !important;
+  color: white !important;
+  pointer-events: auto !important;
+  padding: 12px 16px !important;
+  border-radius: 24px !important;
+  outline: none !important;
 }
 .glass-input:focus { 
-  border-color: rgba(0, 122, 255, 0.55); 
-  background: linear-gradient(135deg, rgba(255, 255, 255, 0.12) 0%, rgba(255, 255, 255, 0.08) 50%, rgba(255, 255, 255, 0.15) 100%); 
+  border: none !important;
+  background: rgba(0, 0, 0, 0.2) !important;
 }
 
 /* Buttons used in suggestions (if re-enabled) */
@@ -649,12 +621,12 @@ button, input, form, [onclick] {
   -webkit-backdrop-filter: blur(10px) saturate(120%);
 }
 .glass-message.user { 
-  background: linear-gradient(135deg, rgba(0, 122, 255, 0.2) 0%, rgba(0, 122, 255, 0.15) 50%, rgba(0, 122, 255, 0.25) 100%); 
-  border-color: rgba(0,122,255,0.4); 
+  background: rgba(0, 0, 0, 0.2); 
+  border-color: rgba(255, 255, 255, 0.3); 
 }
 .glass-message.streaming { 
-  background: linear-gradient(135deg, rgba(52, 199, 89, 0.2) 0%, rgba(52, 199, 89, 0.15) 50%, rgba(52, 199, 89, 0.25) 100%); 
-  border-color: rgba(52,199,89,0.4); 
+  background: rgba(0, 0, 0, 0.2); 
+  border-color: rgba(255, 255, 255, 0.3); 
 }
 .glass-message.error { 
   background: linear-gradient(135deg, rgba(255, 59, 48, 0.2) 0%, rgba(255, 59, 48, 0.15) 50%, rgba(255, 59, 48, 0.25) 100%); 
