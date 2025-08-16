@@ -1,74 +1,28 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useState, useEffect, useRef } from 'react';
 
-const ChromeAgent = () => {
+const AskAgent = () => {
   const [inputText, setInputText] = useState('');
   const [lastResponse, setLastResponse] = useState<string>('');
   const [isProcessing, setIsProcessing] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
-  // Check for pending tasks from MacOSAgent or main process
-  useEffect(() => {
-    // Check for pending task from MacOSAgent in localStorage
-    const pendingTask = localStorage.getItem('pendingAgentTask');
-    if (pendingTask) {
-      setInputText(pendingTask);
-      localStorage.removeItem('pendingAgentTask');
-      
-      // Focus and execute the task
-      setTimeout(() => {
-        if (inputRef.current) {
-          inputRef.current.focus();
-        }
-        handleSendMessage(pendingTask);
-      }, 500);
-      return;
-    }
-    
-    // Also check for pending task from main process
-    window.ipcRenderer.invoke('get-pending-agent-task').then((task: string | null) => {
-      if (task) {
-        setInputText(task);
-        // Clear the task from main process
-        window.ipcRenderer.send('clear-pending-agent-task');
-        
-        setTimeout(() => {
-          if (inputRef.current) {
-            inputRef.current.focus();
-          }
-          handleSendMessage(task);
-        }, 500);
-      }
-    }).catch(() => {
-      // Ignore errors - task may not exist
-    });
-  }, []);
-
   const handleSendMessage = async (text: string) => {
-    // Trim the input text first
     const trimmedText = text.trim();
     if (!trimmedText) return;
 
     try {
       setIsProcessing(true);
+      setLastResponse('Processing your request...');
 
-      // Send message to Chrome via IPC
-      window.ipcRenderer.send('nanobrowser-command', text);
+      // Send message via IPC for screen analysis
+      window.ipcRenderer.send('ask-message', text);
 
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : String(err);
-      console.error('Task error', errorMessage);
+      console.error('Ask error', errorMessage);
       setIsProcessing(false);
     }
-  };
-
-  const handleStopAgent = () => {
-    console.log('Stopping nanobrowser agent...');
-    setIsProcessing(false);
-    setLastResponse('🛑 Agent stopped by user');
-    
-    // Send stop command to main process
-    window.ipcRenderer.send('nanobrowser-stop');
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -80,14 +34,13 @@ const ChromeAgent = () => {
     handleSendMessage(text);
   };
 
-  // Auto-resize textarea to expand downward
+  // Auto-resize textarea
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setInputText(e.target.value);
     
-    // Auto-resize - expand downward when typing
     const textarea = e.target;
-    textarea.style.height = '40px'; // Reset to minimum
-    const newHeight = Math.min(Math.max(textarea.scrollHeight, 40), 120); // Min 40px, max 120px
+    textarea.style.height = '40px';
+    const newHeight = Math.min(Math.max(textarea.scrollHeight, 40), 120);
     textarea.style.height = newHeight + 'px';
   };
 
@@ -99,43 +52,29 @@ const ChromeAgent = () => {
     }
   };
 
-  // Listen for nanobrowser responses
+  // Listen for responses
   useEffect(() => {
     const handleResponse = (_event: any, response: string) => {
       setLastResponse(response);
       setIsProcessing(false);
     };
 
-    window.ipcRenderer.on('nanobrowser-response', handleResponse);
-    
+    window.ipcRenderer.on('ask-response', handleResponse);
     return () => {
-      window.ipcRenderer.removeListener('nanobrowser-response', handleResponse);
+      window.ipcRenderer.removeListener('ask-response', handleResponse);
     };
   }, []);
 
   return (
-    <div className="flex flex-col gap-4">
-      {/* Chat Messages Area - similar to Ask UI */}
-      {lastResponse && (
-        <div className="max-h-60 overflow-y-auto mb-4">
-          <div className="space-y-3">
-            <div className="glass-message-bubble glass-message-assistant" style={{
-              background: 'rgba(0, 0, 0, 0.3)',
-              backdropFilter: 'blur(20px) saturate(180%) contrast(120%) brightness(110%) hue-rotate(5deg)',
-              border: '0.5px solid rgba(255, 255, 255, 0.3)',
-              borderRadius: '12px',
-              padding: '12px 16px'
-            }}>
-              <div className="text-white text-sm leading-relaxed whitespace-pre-wrap">
-                {lastResponse}
-              </div>
-            </div>
+    <div className="w-full">
+      <div className="relative w-full">
+        {lastResponse && (
+          <div className="mb-3 p-3 rounded-xl bg-white/10 text-white text-sm">
+            {lastResponse}
           </div>
-        </div>
-      )}
+        )}
 
-      {/* Input Area - styled like Ask UI */}
-      <div className="glass-chat-input">
+        {/* Processing State - identical to ChromeAgent */}
         {isProcessing ? (
           <div className="flex items-center gap-2 text-white px-4 py-3" style={{
             background: 'rgba(0, 0, 0, 0.3)',
@@ -153,7 +92,7 @@ const ChromeAgent = () => {
               value={inputText}
               onChange={handleInputChange}
               onKeyDown={handleKeyDown}
-              placeholder="What do you want to automate"
+              placeholder="Ask me about your screen..."
               disabled={isProcessing}
               onFocus={() => {
                 window.ipcRenderer.send('chat:focus');
@@ -175,32 +114,7 @@ const ChromeAgent = () => {
               rows={1}
             />
             
-            {/* Stop Button - shows when processing */}
-            {isProcessing && (
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  e.preventDefault();
-                  handleStopAgent();
-                }}
-                className="absolute right-12 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full flex items-center justify-center transition-opacity pointer-events-auto"
-                style={{ 
-                  background: 'rgba(220, 38, 38, 0.2)', 
-                  border: '1px solid rgba(220, 38, 38, 0.5)',
-                  opacity: 0.9,
-                  pointerEvents: 'auto',
-                  zIndex: 10
-                }}
-                title="Stop Agent"
-              >
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2">
-                  <rect x="6" y="6" width="12" height="12" fill="#ef4444"/>
-                </svg>
-              </button>
-            )}
-            
-            {/* Submit Button */}
+            {/* Submit Button - identical to ChromeAgent */}
             <button
               type="submit"
               disabled={!inputText.trim() || isProcessing}
@@ -230,4 +144,4 @@ const ChromeAgent = () => {
   );
 };
 
-export default ChromeAgent; 
+export default AskAgent; 

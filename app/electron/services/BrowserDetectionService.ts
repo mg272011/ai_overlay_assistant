@@ -36,10 +36,10 @@ export class BrowserDetectionService extends EventEmitter {
     // Check for active browsers immediately
     await this.checkActiveBrowsers();
     
-    // Check every 2 seconds for browser changes
+    // Check every 2 seconds for browser changes (faster for auto-switching)
     this.detectionInterval = setInterval(async () => {
       await this.checkActiveBrowsers();
-    }, 5000); // Check every 5 seconds instead of 2 - less annoying
+    }, 2000); // Check every 2 seconds for responsive auto-switching
   }
 
   stopMonitoring() {

@@ -65,8 +65,20 @@ export class ContextualActionsService {
   public async generateContextualActions(currentText: string, speaker: string): Promise<ContextualResults> {
     // Throttle requests to avoid too many API calls
     const now = Date.now();
-    if (now - this.lastActionTime < 300) { // more frequent updates
+    if (now - this.lastActionTime < 3000) { // Much longer delay - only generate after meaningful conversation
       console.log('[ContextualActions] Throttled - too soon since last request');
+      return { searchItems: [], suggestions: [] };
+    }
+
+    // IMPORTANT: Only generate actions if we have enough conversation context
+    if (this.recentTurns.length < 3) {
+      console.log('[ContextualActions] Not enough conversation context yet, waiting...');
+      return { searchItems: [], suggestions: [] };
+    }
+
+    // Skip for very short messages or casual conversation
+    if (currentText.length < 20 || this.isCasualConversation(currentText)) {
+      console.log('[ContextualActions] Skipping casual/short conversation');
       return { searchItems: [], suggestions: [] };
     }
 
@@ -85,8 +97,10 @@ export class ContextualActionsService {
       
       console.log('[ContextualActions] Generated:', results.searchItems.length, 'search items');
       
-      // Cache the result
-      this.actionCache.set(cacheKey, results);
+      // Cache the result ONLY if we got quality results
+      if (results.searchItems.length > 0) {
+        this.actionCache.set(cacheKey, results);
+      }
       
       // Clean old cache entries
       if (this.actionCache.size > 50) {
@@ -103,80 +117,88 @@ export class ContextualActionsService {
     }
   }
 
+  private isCasualConversation(text: string): boolean {
+    const casual = ['hi', 'hello', 'hey', 'thanks', 'okay', 'ok', 'yeah', 'yes', 'no', 'bye', 'goodbye', 'see you'];
+    const lower = text.toLowerCase();
+    return casual.some(word => lower.includes(word)) && text.length < 50;
+  }
+
   private async generateActionsWithAI(currentText: string): Promise<ContextualResults> {
     const recentContext = this.recentTurns
-      .slice(-5) // Last 5 turns for more context
+      .slice(-3) // Only last 3 turns to keep it focused
       .map(turn => `${turn.speaker}: ${turn.text}`)
       .join('\n');
 
-    const systemPrompt = `You generate SMART contextual search suggestions for professional meetings.
+    const systemPrompt = `You are an expert at generating HIGHLY RELEVANT search suggestions for professional meetings and technical discussions.
 
-GOOD search suggestions are:
-- Technical/Professional: "React hooks best practices", "Python async/await guide", "Project management methodologies"
-- Business/Market: "Q3 earnings report [company]", "Market analysis [industry] 2024", "Competitor pricing strategies"
-- Educational/Academic: "MIT OpenCourseWare calculus", "Research papers on [topic]", "How to cite APA format"
-- Location/Travel: "Flight deals to [city]", "Conference venues in [location]", "Business hotels near [airport]"
-- Tools/Software: "Figma vs Sketch comparison", "Best IDE for Python development", "Slack alternatives for teams"
-- Industry/Standards: "ISO 9001 certification process", "GDPR compliance checklist", "Healthcare regulations 2024"
+ONLY generate searches that are:
+✅ SPECIFIC technical topics, products, companies, or methodologies mentioned
+✅ Industry standards, frameworks, or best practices discussed  
+✅ Research papers, documentation, or specific tools mentioned
+✅ Business strategies, market analysis, or competitive intelligence needs
+✅ Educational resources for topics being discussed
 
-BAD search suggestions to NEVER generate:
-- Personal appearance: "latest on [person's name]", "photos of [person]", "[person] personal life"
-- Generic/useless: "information about [vague topic]", "stuff about [thing]", "latest on [random word]"
-- Inappropriate: Anything about someone's appearance, personal life, or private matters
-- Too broad: "everything about [topic]", "all [category] info", "general [subject] knowledge"
+❌ NEVER generate searches for:
+❌ Common words or generic terms (what is "search", "girl", "man", etc.)
+❌ Personal information about individuals
+❌ Vague "latest on X" queries unless X is a specific product/company
+❌ Questions that don't provide useful professional information
+❌ Generic definitions that everyone would know
 
-Examples of SMART contextual searches:
+EXAMPLES OF GOOD SEARCHES:
+- "React Server Components documentation"
+- "OpenAI API pricing 2024"
+- "Kubernetes deployment best practices"
+- "TypeScript 5.0 new features"
+- "PostgreSQL vs MongoDB performance comparison"
+- "Product management OKR templates"
 
-If discussing a technical problem:
-✓ "Stack Overflow [specific error message]"
-✓ "[Technology] troubleshooting guide"
-✓ "[Framework] version compatibility issues"
+EXAMPLES OF BAD SEARCHES TO AVOID:
+- "What is search" (too generic)
+- "What is girl" (meaningless)
+- "Latest on conversation" (too vague)
+- "Information about meeting" (useless)
 
-If discussing business strategy:
-✓ "[Industry] market trends 2024"
-✓ "Case studies [business model] success"
-✓ "[Competitor] annual report analysis"
-
-If someone mentions a person in a professional context:
-✓ "[Person's company] recent news" (NOT about the person personally)
-✓ "[Their product/service] reviews" (focus on their work, not them)
-✓ NEVER search for personal information about individuals
-
-Return JSON with this exact structure:
+Return JSON with this EXACT structure:
 {
   "searchItems": [
     {
-      "text": "Human-readable search action", 
+      "text": "Search for [specific technical/professional topic]", 
       "type": "search",
-      "query": "professional, specific search query",
+      "query": "specific professional search query",
       "confidence": 0.8
     }
   ],
   "suggestions": []
 }
 
-STRICT RULES:
-1. Only suggest searches that would be appropriate in a professional workplace
-2. Focus on actionable, specific information (not vague "latest on X")  
-3. If a person is mentioned, only search for their professional work/company, NEVER personal info
-4. Skip generating suggestions if the topic is too personal or casual
-5. Maximum 2-3 high-quality suggestions, better to have none than bad ones
-6. Each search must be specific enough to return useful results
-7. Valid JSON only`;
+STRICT QUALITY RULES:
+1. Maximum 2 search items - quality over quantity
+2. Only generate if there are genuinely useful technical/professional topics mentioned
+3. Each search must be specific enough to return actionable information
+4. If no good searches can be generated, return empty searchItems array
+5. Confidence must be 0.7 or higher for all items
+6. Every search must provide clear professional value`;
 
-    const userPrompt = `Recent conversation context:
+    const userPrompt = `Conversation context:
 ${recentContext}
 
-Current statement by ${this.recentTurns[this.recentTurns.length - 1]?.speaker || 'someone'}: "${currentText}"
+Latest statement: "${currentText}"
 
-Generate contextual SEARCH ACTIONS for topics mentioned.`;
+Generate ONLY high-quality professional search suggestions for specific topics mentioned. If no specific technical/professional topics were discussed, return empty searchItems array.`;
 
     try {
       let response;
       
       // Try Gemini first if available
       if (this.gemini) {
-        const model = this.gemini.getGenerativeModel({ model: 'gemini-2.5-flash' });
+        const model = this.gemini.getGenerativeModel({ 
+          model: 'gemini-2.5-flash',
+          generationConfig: {
+            temperature: 0.1, // Very low temperature for consistent, focused results
+            maxOutputTokens: 200
+          }
+        });
         const result = await model.generateContent({
           contents: [{
             role: 'user',
@@ -192,8 +214,8 @@ Generate contextual SEARCH ACTIONS for topics mentioned.`;
             { role: 'system', content: systemPrompt },
             { role: 'user', content: userPrompt }
           ],
-          max_tokens: 300,
-          temperature: 0.3
+          max_tokens: 200,
+          temperature: 0.1 // Very low temperature for consistent results
         });
         response = completion.choices[0]?.message?.content?.trim() || '';
       }
@@ -216,43 +238,55 @@ Generate contextual SEARCH ACTIONS for topics mentioned.`;
         parsedResponse = JSON.parse(cleanResponse);
       } catch (parseError) {
         console.warn('[ContextualActions] Failed to parse JSON response:', response);
-        // Try one more time by extracting JSON object pattern
-        try {
-          const jsonMatch = response.match(/\{[\s\S]*\}/);
-          if (jsonMatch) {
-            parsedResponse = JSON.parse(jsonMatch[0]);
-            console.log('[ContextualActions] Successfully extracted JSON from response');
-          } else {
-            return { searchItems: [], suggestions: [] };
-          }
-        } catch (secondError) {
-          console.error('[ContextualActions] Could not extract valid JSON:', secondError);
-          return { searchItems: [], suggestions: [] };
-        }
+        return { searchItems: [], suggestions: [] };
       }
 
-      // Validate and format search items
+      // Validate and filter search items with STRICT quality criteria
       const searchItems: ContextualAction[] = (parsedResponse.searchItems || [])
-        .filter((item: any) => item.text && item.type && item.confidence > 0.4)
-        .slice(0, 3) // Max 3 search items
+        .filter((item: any) => {
+          // Must have all required fields
+          if (!item.text || !item.type || !item.query) return false;
+          
+          // Must have high confidence
+          if ((item.confidence || 0) < 0.7) return false;
+          
+          // Filter out generic/meaningless searches
+          const badPatterns = [
+            /what is \w{1,6}$/i,  // "what is X" where X is very short
+            /latest on \w{1,8}$/i, // "latest on X" where X is very short
+            /information about/i,
+            /stuff about/i,
+            /everything about/i,
+            /general \w+ knowledge/i
+          ];
+          
+          if (badPatterns.some(pattern => pattern.test(item.text))) {
+            console.log('[ContextualActions] Filtered out generic search:', item.text);
+            return false;
+          }
+          
+          // Filter out single word queries or very generic terms
+          const words = item.query.toLowerCase().split(/\s+/);
+          if (words.length === 1 && words[0].length < 6) {
+            console.log('[ContextualActions] Filtered out single short word:', item.query);
+            return false;
+          }
+          
+          return true;
+        })
+        .slice(0, 2) // Max 2 search items
         .map((item: any, index: number) => ({
           id: `search-${Date.now()}-${index}`,
           text: item.text,
           type: item.type as 'search' | 'define' | 'research',
-          query: item.query || item.text,
-          confidence: Math.min(item.confidence || 0.5, 1.0)
+          query: item.query,
+          confidence: Math.min(item.confidence || 0.7, 1.0)
         }));
 
-      // Fallback: ensure at least 2 searches always
-      if (searchItems.length < 2) {
-        const fallback = this.buildFallbackSearches(currentText, 3 - searchItems.length);
-        searchItems.push(...fallback);
-      }
-
-      // Suggestions are disabled here (handled by say-next)
-      const suggestions: MeetingSuggestion[] = [];
-
-      return { searchItems, suggestions };
+      // NO FALLBACK SEARCHES - if AI didn't generate good ones, return empty
+      console.log('[ContextualActions] Final filtered search items:', searchItems.length);
+      
+      return { searchItems, suggestions: [] };
 
     } catch (error) {
       console.error('[ContextualActions] AI generation error:', error);
@@ -265,32 +299,7 @@ Generate contextual SEARCH ACTIONS for topics mentioned.`;
     return text.toLowerCase().slice(0, 50).replace(/\s+/g, ' ').trim();
   }
 
-  private buildFallbackSearches(text: string, needed: number): ContextualAction[] {
-    const cleaned = (text || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ');
-    const tokens = cleaned.split(/\s+/).filter(Boolean);
-    const stop = new Set(['the','a','an','and','or','but','if','then','to','of','in','on','for','with','is','are','was','were','be','being','been','it','this','that','these','those','i','you','he','she','we','they']);
-    const keywords = Array.from(new Set(tokens.filter(w => !stop.has(w) && w.length >= 4)))
-      .sort((a, b) => b.length - a.length)
-      .slice(0, Math.max(2, needed));
-    const make = (text: string, query: string, idx: number): ContextualAction => ({
-      id: `fallback-${Date.now()}-${idx}`,
-      text,
-      type: 'search',
-      query,
-      confidence: 0.55,
-    });
-    const out: ContextualAction[] = [];
-    if (keywords.length >= 1) {
-      const k = keywords[0];
-      out.push(make(`What is ${k}?`, `${k} meaning`, 0));
-    }
-    if (keywords.length >= 2) {
-      const k = keywords[1];
-      out.push(make(`Latest on ${k}`, `${k} latest`, 1));
-    }
-    // Removed "Define key terms from the conversation" action as requested
-    return out.slice(0, needed);
-  }
+  // REMOVED buildFallbackSearches - no more garbage fallback searches!
 
   public clearCache(): void {
     this.actionCache.clear();

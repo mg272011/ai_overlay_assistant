@@ -5,6 +5,7 @@ import "./glass-ui/listen/ListenView.js";
   // Agent Components
   import MacOSAgent from "./agents/MacOSAgent";
   import ChromeAgent from "./agents/ChromeAgent";
+  import AskAgent from "./agents/AskAgent";
 
 function App() {
   const [prompt, setPrompt] = useState("");
@@ -71,6 +72,8 @@ function App() {
   // Menu dropdown state
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const menuCloseTimerRef = useRef<NodeJS.Timeout | null>(null);
+  
+  // Clean state - no more chat window complexity
   
   // Debug menu state changes
   useEffect(() => {
@@ -425,34 +428,41 @@ function App() {
     [prompt, isStreaming, agentMode, highlightChatVisible, highlightedImage, resumeContent, resumeFileName]
   );
 
-  // Check Chrome status when agent mode is activated
+  // Check Chrome status and start browser monitoring when agent mode is activated
   useEffect(() => {
     if (agentMode === 'agent') {
-      console.log('[AgentMode] Checking Chrome status for agent...');
       window.ipcRenderer.send('check-chrome-active');
+      window.ipcRenderer.send('start-browser-monitoring');
       
       const handleChromeStatus = (_event: any, isActive: boolean) => {
-        console.log('[AgentMode] Chrome status received:', isActive);
         setIsChromeActive(isActive);
       };
       
+      const handleBrowserDetected = (_event: any, data: { browserName: string, isChromeActive: boolean }) => {
+        if (data.isChromeActive) {
+          setIsChromeActive(true);
+          // Notify that we've switched to Chrome for any ongoing tasks
+          window.ipcRenderer.send('chrome-agent-activated');
+        }
+      };
+      
       window.ipcRenderer.on('chrome-status', handleChromeStatus);
+      window.ipcRenderer.on('browser-detected', handleBrowserDetected);
       
       return () => {
         window.ipcRenderer.removeListener('chrome-status', handleChromeStatus);
+        window.ipcRenderer.removeListener('browser-detected', handleBrowserDetected);
+        window.ipcRenderer.send('stop-browser-monitoring');
       };
+    } else {
+      // Also stop monitoring if not in agent mode
+      window.ipcRenderer.send('stop-browser-monitoring');
     }
   }, [agentMode]);
 
   // Notify main process when agent mode changes
   useEffect(() => {
-    console.log('[AgentMode] State changed to:', agentMode);
-    // Log for debugging
-    if (agentMode === 'agent') {
-      console.log('[AgentMode] AGENT INPUT BAR SHOULD BE VISIBLE NOW');
-    } else {
-      console.log('[AgentMode] Agent input bar hidden');
-    }
+    // Agent mode state change handled by browser monitoring above
   }, [agentMode]);
 
   // Listen for live transcripts when in live mode
@@ -668,12 +678,12 @@ function App() {
             console.log('[App] Refreshing existing say-next chat:', sayNextId);
             // Clear old messages and show new loading state
             return prev.map(c => c.id === existing.id 
-              ? { ...c, messages: [], streaming: true, currentStream: 'Generating suggestion based on latest conversation...' }
+              ? { ...c, messages: [], streaming: true, currentStream: 'Thinking of what you could say next...' }
               : c
             );
           }
           console.log('[App] Creating new say-next chat:', id);
-          return [...prev, { id, title, messages: [], streaming: true, currentStream: 'Generating suggestion based on latest conversation...', ...( { sayNext: true } as any) } as any];
+          return [...prev, { id, title, messages: [], streaming: true, currentStream: 'Thinking of what you could say next...', ...( { sayNext: true } as any) } as any];
         });
         setIsChatPaneVisible(true);
         // Kick off the say-next stream in main process using recent context
@@ -721,6 +731,75 @@ function App() {
     const handleKeyDown = (e: KeyboardEvent) => {
       console.log('[Keyboard] Key pressed:', e.key, 'metaKey:', e.metaKey, 'ctrlKey:', e.ctrlKey, 'chat visible:', isChatPaneVisible, 'highlight visible:', highlightChatVisible);
       
+      // Command+Option: Toggle Agent mode
+      if ((e.metaKey || e.ctrlKey) && e.altKey && !e.key.match(/^[a-zA-Z0-9]$/)) {
+        e.preventDefault();
+        if (agentMode === "agent") {
+          setAgentMode("chat");
+          setIsChatPaneVisible(false);
+        } else {
+          setAgentMode("agent");
+          setIsChatPaneVisible(false);
+          setHighlightChatVisible(false);
+        }
+        return;
+      }
+      
+      // Command+Delete: Toggle Select (highlight) mode
+      if ((e.metaKey || e.ctrlKey) && (e.key === 'Delete' || e.key === 'Backspace')) {
+        e.preventDefault();
+        if (isHighlightMode || highlightChatVisible) {
+          setIsHighlightMode(false);
+          setHighlightedImage(null);
+          setHighlightChatVisible(false);
+          window.ipcRenderer.send("cancel-screen-highlight");
+        } else {
+          if (!isLiveMode) {
+            setIsHighlightMode(true);
+            window.ipcRenderer.send("start-screen-highlight");
+          }
+        }
+        return;
+      }
+      
+      // Command+Shift: Toggle Listen mode
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && !e.key.match(/^[a-zA-Z0-9]$/)) {
+        e.preventDefault();
+        if (isLiveMode) {
+          // Stop listen mode
+          if (audioHandleRef.current) {
+            audioHandleRef.current.stop();
+            audioHandleRef.current = null;
+          }
+          setIsLiveMode(false);
+          localStorage.removeItem('opus-meeting-mode');
+          setMeetingChats([]);
+          setIsChatPaneVisible(false);
+          setMessages([]);
+          setCurrentStream("");
+          window.ipcRenderer.send("stop-conversation-mode");
+        } else {
+          // Start listen mode
+          setIsLiveMode(true);
+          setIsChatPaneVisible(true);
+          localStorage.setItem('opus-meeting-mode', 'true');
+          window.ipcRenderer.send("start-conversation-mode", "live");
+          startAudioStreaming((chunk) => {
+            console.log('[AudioStreaming] Sending chunk to main process, size:', chunk.length);
+            window.ipcRenderer.send("live-audio-chunk", chunk);
+          }).then(({ handle }) => {
+            audioHandleRef.current = handle;
+            console.log('[AudioStreaming] ✅ Audio streaming started successfully');
+          }).catch((error) => {
+            console.error('[AudioStreaming] ❌ Failed to start audio streaming:', error);
+            alert('Failed to start audio capture: ' + error.message);
+            setIsLiveMode(false);
+            localStorage.removeItem('opus-meeting-mode');
+          });
+        }
+        return;
+      }
+      
       // Command+Enter: Toggle chat open/closed
       if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
         console.log('[Keyboard] Cmd+Enter detected, toggling chat');
@@ -761,7 +840,7 @@ function App() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isChatPaneVisible, highlightChatVisible, prompt, isStreaming, handleSubmit]);
+  }, [isChatPaneVisible, highlightChatVisible, prompt, isStreaming, handleSubmit, agentMode, isHighlightMode, isLiveMode, audioHandleRef]);
 
   // Cleanup audio streaming on unmount
   useEffect(() => {
@@ -777,18 +856,28 @@ function App() {
     let overMainbar = false;
     let overInputArea = false;
     let overChatPane = false;
+    let overHighlightScroll = false;
     let blurTimeout: any = null;
 
     const applyState = () => {
       const inputFocused = document.activeElement === inputRef.current;
-      const shouldFocus = isLiveMode || overMainbar || overInputArea || overChatPane || inputFocused;
+      // Check if any agent input is focused
+      const agentInputFocused = document.activeElement?.tagName === 'TEXTAREA' && 
+                               (document.activeElement.className.includes('dark-input') || 
+                                document.activeElement.closest('.agent-input-area'));
+      // Don't force focus just because we're in agent mode - only when actually interacting
+      const shouldFocus = isLiveMode || overMainbar || overInputArea || overChatPane || overHighlightScroll || inputFocused || agentInputFocused;
       if (shouldFocus) {
         window.ipcRenderer.send('chat:focus');
       } else {
         if (blurTimeout) clearTimeout(blurTimeout);
         blurTimeout = setTimeout(() => {
           const stillFocused = document.activeElement === inputRef.current;
-          if (!isLiveMode && !overMainbar && !overInputArea && !overChatPane && !stillFocused) {
+          const stillAgentFocused = document.activeElement?.tagName === 'TEXTAREA' && 
+                                   (document.activeElement.className.includes('dark-input') || 
+                                    document.activeElement.closest('.agent-input-area'));
+          // Allow blur even in agent mode when not actively using UI
+          if (!isLiveMode && !overMainbar && !overInputArea && !overChatPane && !overHighlightScroll && !stillFocused && !stillAgentFocused) {
             window.ipcRenderer.send('chat:blur');
           }
         }, 200);
@@ -796,8 +885,9 @@ function App() {
     };
 
     const mainbar = document.getElementById('mainbar');
-    const inputArea = document.querySelector('.glass-chat-input-area') as HTMLElement | null;
+    const inputAreas = document.querySelectorAll('.glass-chat-input-area');
     const chatPane = document.getElementById('chat-pane');
+    const highlightScrollArea = highlightScrollRef.current;
 
     const onMainbarEnter = () => { overMainbar = true; applyState(); };
     const onMainbarLeave = () => { overMainbar = false; applyState(); };
@@ -805,16 +895,25 @@ function App() {
     const onInputLeave = () => { overInputArea = false; applyState(); };
     const onChatPaneEnter = () => { overChatPane = true; applyState(); };
     const onChatPaneLeave = () => { overChatPane = false; applyState(); };
+    const onHighlightScrollEnter = () => { overHighlightScroll = true; applyState(); };
+    const onHighlightScrollLeave = () => { overHighlightScroll = false; applyState(); };
 
     const onInputFocus = () => { applyState(); };
     const onInputBlur = () => { applyState(); };
 
     mainbar?.addEventListener('pointerenter', onMainbarEnter);
     mainbar?.addEventListener('pointerleave', onMainbarLeave);
-    inputArea?.addEventListener('pointerenter', onInputEnter);
-    inputArea?.addEventListener('pointerleave', onInputLeave);
+    
+    // Add listeners to all input areas (both ask and agent mode)
+    inputAreas.forEach(area => {
+      area.addEventListener('pointerenter', onInputEnter);
+      area.addEventListener('pointerleave', onInputLeave);
+    });
+    
     chatPane?.addEventListener('pointerenter', onChatPaneEnter);
     chatPane?.addEventListener('pointerleave', onChatPaneLeave);
+    highlightScrollArea?.addEventListener('pointerenter', onHighlightScrollEnter);
+    highlightScrollArea?.addEventListener('pointerleave', onHighlightScrollLeave);
 
     const inputEl = inputRef.current;
     inputEl?.addEventListener('focus', onInputFocus);
@@ -823,15 +922,22 @@ function App() {
     return () => {
       mainbar?.removeEventListener('pointerenter', onMainbarEnter);
       mainbar?.removeEventListener('pointerleave', onMainbarLeave);
-      inputArea?.removeEventListener('pointerenter', onInputEnter);
-      inputArea?.removeEventListener('pointerleave', onInputLeave);
+      
+      // Remove listeners from all input areas
+      inputAreas.forEach(area => {
+        area.removeEventListener('pointerenter', onInputEnter);
+        area.removeEventListener('pointerleave', onInputLeave);
+      });
+      
       chatPane?.removeEventListener('pointerenter', onChatPaneEnter);
       chatPane?.removeEventListener('pointerleave', onChatPaneLeave);
+      highlightScrollArea?.removeEventListener('pointerenter', onHighlightScrollEnter);
+      highlightScrollArea?.removeEventListener('pointerleave', onHighlightScrollLeave);
       inputEl?.removeEventListener('focus', onInputFocus);
       inputEl?.removeEventListener('blur', onInputBlur);
       if (blurTimeout) clearTimeout(blurTimeout);
     };
-  }, []);
+  }, [agentMode, isChatPaneVisible]);
 
   // Emergency stop keyboard shortcut (Cmd+Shift+X)
   useEffect(() => {
@@ -915,75 +1021,103 @@ function App() {
     };
   }, [isStreaming, agentMode, typewriterFullText]);
 
+  // Clean and simple - no complex message handling
+
   return (
-    <div className="w-full h-full flex flex-col items-center justify-start gap-1 pt-2 bg-transparent">
-      {/* Clonely-style Mainbar */}
-      <div id="mainbar" className="mainbar-glass rounded-full font-sans flex-none w-[30vw] h-[6vh] max-w-[30vw] max-h-[6vh] px-3 pointer-events-auto app-region-drag" style={{ overflow: 'visible' }}>
+    <div className="w-full h-full flex flex-col bg-transparent">
+      {/* Main bar - fixed at top */}
+      <div className="flex-none flex items-center justify-center pt-1 pb-2">
+        <div id="mainbar" className="mainbar-glass rounded-full font-sans w-[26vw] h-[5vh] max-w-[26vw] max-h-[5vh] px-3 pointer-events-auto app-region-drag" style={{ overflow: 'visible' }}>
         {/* Draggable areas on the sides */}
-        <div className="absolute left-0 top-0 w-8 h-full app-region-drag pointer-events-auto"></div>
-        <div className="absolute right-0 top-0 w-8 h-full app-region-drag pointer-events-auto"></div>
-        <div className="flex items-center justify-center gap-2 w-full h-full relative z-10">
+        <div className="absolute left-0 top-0 w-6 h-full app-region-drag pointer-events-auto"></div>
+        <div className="absolute right-0 top-0 w-6 h-full app-region-drag pointer-events-auto"></div>
+        <div className="flex items-center justify-center gap-1 w-full h-full relative z-10">
           {/* Left - Chat button */}
           <button
             type="button"
             onClick={(e) => {
               e.stopPropagation();
               e.preventDefault();
-              console.log('[Chat Button] Clicked! isChatPaneVisible:', isChatPaneVisible);
               
-              // Close highlight mode if active
+              // Close other modes when opening Ask mode
+              if (isLiveMode) {
+                console.log('[Ask Button] Closing Live mode to open Ask mode');
+                // Stop audio streaming
+                if (audioHandleRef.current) {
+                  audioHandleRef.current.stop();
+                  audioHandleRef.current = null;
+                }
+                setIsLiveMode(false);
+                localStorage.removeItem('opus-meeting-mode');
+                setMeetingChats([]);
+                setMessages([]);
+                setCurrentStream("");
+                window.ipcRenderer.send("stop-conversation-mode");
+              }
               if (isHighlightMode) {
+                console.log('[Ask Button] Closing Select mode to open Ask mode');
                 setIsHighlightMode(false);
                 setHighlightedImage(null);
                 window.ipcRenderer.send("cancel-screen-highlight");
               }
               
-              // Agent mode removed - always chat mode
-              const willOpen = !isChatPaneVisible;
-              setIsChatPaneVisible(willOpen);
-              setHighlightChatVisible(false); // Close highlight chat if open
-              if (willOpen) {
-                // Focus input when opening chat and enable interaction
+              // If agent mode is active, close it and switch to ask mode
+              if (agentMode === "agent") {
+                setAgentMode("chat");
+                setIsChatPaneVisible(true);
+                setHighlightChatVisible(false);
+                // Focus input when opening ask mode
                 window.ipcRenderer.send('chat:focus');
                 setTimeout(() => inputRef.current?.focus(), 100);
               } else {
-                // When closing chat, keep overlay interactive; CSS handles pass-through
-                // No chat:blur here to avoid losing interactivity for reopening
+                // Already in chat mode, toggle ask pane
+                const willOpen = !isChatPaneVisible;
+                setIsChatPaneVisible(willOpen);
+                setHighlightChatVisible(false);
+                if (willOpen) {
+                  // Focus input when opening chat and enable interaction
+                  window.ipcRenderer.send('chat:focus');
+                  setTimeout(() => inputRef.current?.focus(), 100);
+                }
               }
             }}
-            className={`liquid-button inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md text-sm font-medium transition-all h-8 px-3 ${
+            className={`liquid-button inline-flex items-center justify-center gap-1 whitespace-nowrap rounded-md text-xs font-medium transition-all duration-300 ease-in-out h-7 px-2 ${
                agentMode === "chat" && isChatPaneVisible && !isLiveMode ? 'bg-secondary text-secondary-foreground shadow-xs' : 'hover:bg-accent hover:text-accent-foreground'
              } ${
                isStreaming && agentMode === "chat" && !isLiveMode ? 'bg-green-600 text-white shadow-xs animate-pulse' : ''
              }`} data-active={agentMode === 'chat' && isChatPaneVisible && !isLiveMode}
-            title={agentMode === "chat" && isStreaming ? "AI is thinking..." : isChatPaneVisible && !isLiveMode ? "Close Chat (⌘+↵)" : "Open Chat Mode (Screen Analysis)"}
+            title={
+              agentMode === "chat" && isStreaming ? "AI is thinking..." : 
+              agentMode === "agent" ? "Switch to Ask Mode (⌘+↵)" :
+              isChatPaneVisible && !isLiveMode ? "Close Ask Mode (⌘+↵)" : "Open Ask Mode (⌘+↵)"
+            }
           >
             <span>Ask</span>
             {isChatPaneVisible && !isLiveMode ? (
               <>
                 {/* Close icon */}
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M18 6 6 18"/>
                   <path d="m6 6 12 12"/>
                 </svg>
               </>
             ) : (
               <>
-                {/* Command key icon */}
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M18 3a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3H6a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3V6a3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3h12a3 3 0 0 0 3-3 3 3 0 0 0-3-3z"/>
-                </svg>
-                {/* Enter key icon */}
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <polyline points="9 10 4 15 9 20"/>
-                  <path d="M20 4v7a4 4 0 0 1-4 4H4"/>
-                </svg>
+                            {/* Command key icon */}
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M18 3a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3H6a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3V6a3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3h12a3 3 0 0 0 3-3 3 3 0 0 0-3-3z"/>
+            </svg>
+            {/* Enter key icon */}
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="9 10 4 15 9 20"/>
+              <path d="M20 4v7a4 4 0 0 1-4 4H4"/>
+            </svg>
               </>
             )}
           </button>
 
           {/* Draggable spacer */}
-          <div className="w-2 h-full app-region-drag pointer-events-auto"></div>
+          <div className="w-1 h-full app-region-drag pointer-events-auto"></div>
 
                     {/* Agent button - NanoBrowser integration */}
           <button
@@ -991,29 +1125,51 @@ function App() {
             onClick={(e) => {
               e.stopPropagation();
               e.preventDefault();
-              console.log('[Agent Button] Clicked! Current mode:', agentMode);
+              console.log('[Agent Button] Clicked! Current state - agentMode:', agentMode, 'isChatPaneVisible:', isChatPaneVisible);
               
-              // Simple toggle without any IPC calls that might cause issues
+              // Close other modes when opening Agent mode
+              if (isLiveMode && agentMode !== "agent") {
+                console.log('[Agent Button] Closing Live mode to open Agent mode');
+                // Stop audio streaming
+                if (audioHandleRef.current) {
+                  audioHandleRef.current.stop();
+                  audioHandleRef.current = null;
+                }
+                setIsLiveMode(false);
+                localStorage.removeItem('opus-meeting-mode');
+                setMeetingChats([]);
+                setMessages([]);
+                setCurrentStream("");
+                window.ipcRenderer.send("stop-conversation-mode");
+              }
+              if (isHighlightMode && agentMode !== "agent") {
+                console.log('[Agent Button] Closing Select mode to open Agent mode');
+                setIsHighlightMode(false);
+                setHighlightedImage(null);
+                window.ipcRenderer.send("cancel-screen-highlight");
+              }
+              
               if (agentMode === "agent") {
-                console.log('[Agent Button] Closing NanoBrowser agent');
+                console.log('[Agent Button] Closing Agent mode');
                 setAgentMode("chat");
                 setIsChatPaneVisible(false);
               } else {
-                console.log('[Agent Button] Opening NanoBrowser agent');
+                console.log('[Agent Button] Switching from Ask to Agent mode');
                 setAgentMode("agent");
-                setIsChatPaneVisible(false);
+                setIsChatPaneVisible(false); // Close ask pane
+                setHighlightChatVisible(false); // Close highlight chat if open
               }
             }}
-            className={`liquid-button inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md text-sm font-medium transition-all h-8 px-3 ${
+            className={`liquid-button inline-flex items-center justify-center gap-1 whitespace-nowrap rounded-md text-xs font-medium transition-all duration-300 ease-in-out h-7 px-2 ${
               agentMode === "agent" ? 'bg-secondary text-secondary-foreground shadow-xs' : 'hover:bg-accent hover:text-accent-foreground'
-            }`}
-            title={agentMode === "agent" ? "NanoBrowser Agent Active" : "Activate NanoBrowser Agent (Chrome Required)"}
+            }`} data-active={agentMode === 'agent'}
+            title={agentMode === "agent" ? "Chrome Agent Active (⌘+Option)" : "Activate Chrome Agent (⌘+Option)"}
           >
             <span>Agent</span>
           </button>
 
           {/* Draggable spacer */}
-          <div className="w-2 h-full app-region-drag pointer-events-auto"></div>
+          <div className="w-1 h-full app-region-drag pointer-events-auto"></div>
 
           {/* NEW: Screen Highlight button */}
           <button
@@ -1030,27 +1186,45 @@ function App() {
                 // Send cancel signal to close the highlight overlay
                 window.ipcRenderer.send("cancel-screen-highlight");
               } else {
-                // Prevent opening highlight if another mode is active
+                // Close other modes when opening Select mode
                 if (isLiveMode) {
-                  console.log('[Highlight Button] Cannot open - live mode is active');
-                  return;
+                  console.log('[Select Button] Closing Live mode to open Select mode');
+                  // Stop audio streaming
+                  if (audioHandleRef.current) {
+                    audioHandleRef.current.stop();
+                    audioHandleRef.current = null;
+                  }
+                  setIsLiveMode(false);
+                  localStorage.removeItem('opus-meeting-mode');
+                  setMeetingChats([]);
+                  setMessages([]);
+                  setCurrentStream("");
+                  window.ipcRenderer.send("stop-conversation-mode");
+                }
+                if (agentMode === "agent") {
+                  console.log('[Select Button] Closing Agent mode to open Select mode');
+                  setAgentMode("chat");
+                  setIsChatPaneVisible(false);
+                }
+                if (agentMode === "chat" && isChatPaneVisible) {
+                  console.log('[Select Button] Closing Ask mode to open Select mode');
+                  setIsChatPaneVisible(false);
                 }
                 // Start screen highlighting
                 setIsHighlightMode(true);
                 window.ipcRenderer.send("start-screen-highlight");
               }
             }}
-            className={`liquid-button inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md text-sm font-medium transition-all h-8 px-3 ${
+            className={`liquid-button inline-flex items-center justify-center gap-1 whitespace-nowrap rounded-md text-xs font-medium transition-all h-7 px-2 ${
               isHighlightMode ? 'bg-blue-600 text-white shadow-xs' : 'hover:bg-accent hover:text-accent-foreground'
             }`}
-            title={isHighlightMode ? "Cancel Highlight (ESC)" : "Highlight & Ask (Screen Selection)"}
+            title={isHighlightMode ? "Cancel Highlight (ESC or ⌘+Delete)" : "Highlight & Ask (⌘+Delete)"}
           >
             <span>Select</span>
-            {null}
           </button>
 
           {/* Draggable spacer */}
-          <div className="w-2 h-full app-region-drag pointer-events-auto"></div>
+          <div className="w-1 h-full app-region-drag pointer-events-auto"></div>
 
           {/* Listen button */}
            <button
@@ -1085,6 +1259,23 @@ function App() {
                 window.ipcRenderer.send("stop-conversation-mode");
                 console.log('[Microphone Button] Stop sequence complete');
               } else {
+                // Close other modes when opening Listen mode
+                if (isHighlightMode) {
+                  console.log('[Listen Button] Closing Select mode to open Listen mode');
+                  setIsHighlightMode(false);
+                  setHighlightedImage(null);
+                  window.ipcRenderer.send("cancel-screen-highlight");
+                }
+                if (agentMode === "agent") {
+                  console.log('[Listen Button] Closing Agent mode to open Listen mode');
+                  setAgentMode("chat");
+                  setIsChatPaneVisible(false);
+                }
+                if (agentMode === "chat" && isChatPaneVisible) {
+                  console.log('[Listen Button] Closing Ask mode to open Listen mode');
+                  setIsChatPaneVisible(false);
+                }
+                
                 console.log('[Microphone Button] Starting live mode');
                 setIsLiveMode(true);
                 setIsChatPaneVisible(true);
@@ -1116,17 +1307,17 @@ function App() {
                 console.log('[Microphone Button] Start sequence initiated');
               }
             }}
-            className={`liquid-button liquid-button--mic inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md text-sm font-medium transition-all h-8 px-3 ${
+            className={`liquid-button liquid-button--mic inline-flex items-center justify-center gap-1 whitespace-nowrap rounded-md text-xs font-medium transition-all h-7 px-2 ${
                isLiveMode ? 'bg-destructive text-white shadow-xs hover:bg-destructive/90' : 'hover:bg-accent hover:text-accent-foreground'
              }`} data-live={isLiveMode}
-            title={isLiveMode ? "Stop Live Feedback" : "Start Live Feedback"}
+            title={isLiveMode ? "Stop Live Feedback (⌘+Shift)" : "Start Live Feedback (⌘+Shift)"}
           >
             <span>Listen</span>
              <span className="eq" aria-hidden="true" style={{alignSelf:'center'}}><span></span><span></span><span></span></span>
           </button>
 
           {/* Draggable spacer */}
-          <div className="w-2 h-full app-region-drag pointer-events-auto"></div>
+          <div className="w-1 h-full app-region-drag pointer-events-auto"></div>
 
           {/* 3-dots menu */}
           <div
@@ -1163,7 +1354,7 @@ function App() {
                 console.log('[Menu Button] Mouse entered');
                 setIsMenuOpen(true);
               }}
-              className="liquid-button inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md text-sm font-medium h-8 px-3 app-region-no-drag pointer-events-auto relative z-50"
+              className="liquid-button inline-flex items-center justify-center gap-1 whitespace-nowrap rounded-md text-xs font-medium h-7 px-2 app-region-no-drag pointer-events-auto relative z-50"
               title="Menu"
               style={{ pointerEvents: 'auto' }}
             >
@@ -1203,10 +1394,7 @@ function App() {
                   className="w-full text-left px-3 py-2 text-xs text-white flex items-center gap-2 transition-all hover:bg-white/10 rounded-md"
                   title="Hide (⌘+⌫)"
                 >
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M18 3a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3H6a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3V6a3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3h12a3 3 0 0 0 3-3 3 3 0 0 0-3-3z"/>
-                  </svg>
-                                     <span>Hide <span className="ml-1 text-[10px] text-white">⌘⌫</span></span>
+                  <span>Hide <span className="ml-1 text-[10px] text-white">⌘⌫</span></span>
                 </button>
 
                 {/* Quit option */}
@@ -1221,25 +1409,68 @@ function App() {
                   className="w-full text-left px-3 py-2 text-xs text-white flex items-center gap-2 transition-all hover:bg-white/10 rounded-md"
                   title="Quit App"
                 >
+                  <span>Quit</span>
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M18 6 6 18"/>
                     <path d="m6 6 12 12"/>
                   </svg>
-                  <span>Quit</span>
                 </button>
               </div>
             )}
           </div>
         </div>
+        </div>
       </div>
 
+      {/* Content area - flex grow to fill space */}
+      <div className="flex-1 flex flex-col items-center justify-start">
+        {/* Select Mode UI - positioned under main bar */}
+      {isHighlightMode && (
+        <div className="fixed top-16 left-1/2 transform -translate-x-1/2 flex items-center gap-4 z-40 pointer-events-auto">
+          {/* Drag to select button */}
+          <button 
+            className="flex items-center gap-2 px-4 py-3 text-white text-sm rounded-xl transition-all hover:bg-white/10 pointer-events-auto"
+            style={{
+              background: 'rgba(0, 0, 0, 0.3)',
+              backdropFilter: 'blur(20px) saturate(180%) contrast(120%) brightness(110%) hue-rotate(5deg)',
+              border: '0.5px solid rgba(255, 255, 255, 0.3)',
+            }}
+          >
+            <span>Drag to select</span>
+          </button>
 
-
-
+          {/* Cancel button */}
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              e.preventDefault();
+              console.log('[Select Cancel Button] Clicked!');
+              setIsHighlightMode(false);
+              setHighlightedImage(null);
+              window.ipcRenderer.send("cancel-screen-highlight");
+            }}
+            onMouseDown={(e) => {
+              e.stopPropagation();
+            }}
+            onMouseUp={(e) => {
+              e.stopPropagation();
+            }}
+            className="flex items-center gap-2 px-5 py-3 text-white text-sm rounded-xl transition-all hover:bg-red-600/20 pointer-events-auto cursor-pointer"
+            style={{
+              background: 'rgba(220, 38, 38, 0.15)',
+              backdropFilter: 'blur(20px) saturate(180%) contrast(120%) brightness(110%) hue-rotate(5deg)',
+              border: '0.5px solid rgba(220, 38, 38, 0.4)',
+            }}
+          >
+            <span>Cancel</span>
+          </button>
+        </div>
+      )}
 
       {/* AI Pane - Stays open when agent is working */}
       <div id="chat-pane" className={`overflow-hidden liquid-animate ${
-        (isChatPaneVisible || isStreaming || messages.length > 0 || highlightChatVisible || meetingChats.length > 0) ? 'max-h-[70vh] opacity-100 liquid-open' : 'max-h-0 opacity-0 liquid-closed'
+        (isChatPaneVisible || isStreaming || messages.length > 0 || highlightChatVisible || meetingChats.length > 0) ? 'max-h-[25vh] opacity-100 liquid-open' : 'max-h-0 opacity-0 liquid-closed'
       } px-4 ${isLiveMode ? 'w-[70vw]' : 'w-[40vw]'} pointer-events-auto`}>
         <div className={`max-h-full w-full bg-transparent p-2 gap-3 ${isLiveMode ? 'meeting-panels' : 'flex'}`}>
           {/* Left Panel - Transcript (only in live mode) - CENTERED by default */}
@@ -1316,7 +1547,7 @@ function App() {
 
           {/* Highlight Chat Content (when active) - Same size as regular chat */}
             {highlightChatVisible && highlightedImage && (
-              <div className="flex-1 flex flex-col h-full gap-2 min-w-0 text-sm max-h-[65vh] pointer-events-auto mx-auto" style={{ width: '420px', minWidth: '380px', maxWidth: '440px' }}>
+              <div className="flex-1 flex flex-col h-full gap-2 min-w-0 text-sm max-h-[25vh] pointer-events-auto mx-auto" style={{ width: '420px', minWidth: '380px', maxWidth: '440px' }}>
                 <div className="flex-1 liquid-panel rounded-2xl flex flex-col overflow-hidden">
                   {/* Header with close button */}
                   <div className="glass-chat-header px-4 pt-3 pb-2">
@@ -1354,7 +1585,29 @@ function App() {
                     </div>
                   </div>
                   
-                  <div className="flex-1 glass-chat-content text-sm leading-relaxed" style={{ maxHeight: 'calc(65vh - 120px)' }}>
+                  <div 
+                    ref={highlightScrollRef}
+                    className="flex-1 glass-chat-content text-sm leading-relaxed" 
+                    style={{ 
+                      maxHeight: 'calc(75vh - 140px)',
+                      minHeight: '300px',
+                      overflowY: 'auto',
+                      overflowX: 'hidden',
+                      pointerEvents: 'auto',
+                      scrollBehavior: 'smooth'
+                    }}
+                    onMouseEnter={() => {
+                      window.ipcRenderer.send('chat:focus');
+                    }}
+                    onWheel={(e) => {
+                      e.stopPropagation();
+                      window.ipcRenderer.send('chat:focus');
+                    }}
+                    onScroll={(e) => {
+                      e.stopPropagation();
+                      window.ipcRenderer.send('chat:focus');
+                    }}
+                  >
                     {/* Chat messages for highlight */}
                     {messages.map((msg, i) => (
                       <div
@@ -1391,7 +1644,7 @@ function App() {
                   </div>
                   
                   {/* Input Area - Fixed at the bottom of the panel */}
-                  <div className="border-t border-white/10 p-3 bg-white/[0.02]">
+                  <div className="border-t border-white/10 p-3 bg-white/[0.02] glass-chat-input-area">
                     <form onSubmit={handleSubmit} className="relative">
                       <input
                         ref={inputRef}
@@ -1421,118 +1674,34 @@ function App() {
               </div>
             )}
             
-            {/* Regular Chat/Command Content */}
-          {!highlightChatVisible && !isLiveMode && (
-            <div className="flex-1 flex flex-col h-full gap-2 min-w-0 text-sm max-h-[65vh] pointer-events-auto mx-auto" style={{ width: '420px', minWidth: '380px', maxWidth: '440px' }}>
-              <div className="flex-1 liquid-panel rounded-2xl flex flex-col overflow-hidden">
-               {/* Agent Status Bar with Mode Toggle */}
-               <div className="glass-chat-header px-4 pt-3 pb-2">
-                 <div className="flex items-center justify-between">
-                   <div className="flex items-center gap-3">
-                     <span className="text-xs text-white">
-                       Ask Mode
-                     </span>
-                   </div>
-                   {/* Close button */}
-                   {!isStreaming && (
-                     <button
-                       onClick={() => {
-                         setIsChatPaneVisible(false);
-                         setMessages([]);
-                         setCurrentStream("");
-                         currentStreamRef.current = "";
-                       }}
-                       className="text-white hover:text-white transition-colors p-1 rounded hover:bg-white/10"
-                       title="Close chat"
-                     >
-                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                         <path d="M18 6 6 18"/>
-                         <path d="m6 6 12 12"/>
-                       </svg>
-                     </button>
-                   )}
-                 </div>
-               </div>
-               
-               <div className="flex-1 p-4 overflow-y-auto text-sm leading-relaxed" style={{ maxHeight: 'calc(65vh - 120px)' }}>
-                 {messages.map((msg, i) => (
-                   <div key={i} className={`mb-3 p-3 rounded-xl liquid-panel text-white`}>
-                     <div className="font-semibold mb-1">{msg.type.charAt(0).toUpperCase() + msg.type.slice(1)}</div>
-                     <div className="whitespace-pre-wrap">{msg.message}</div>
-                   </div>
-                 ))}
-
-                 {(agentMode === 'chat' && !isStreaming && typewriterText) ? (
-                   <div className="p-3 rounded-xl liquid-panel text-white">
-                     <div className="font-semibold mb-1">Response</div>
-                     <div className="whitespace-pre-wrap">{typewriterText}</div>
-                   </div>
-                 ) : (isStreaming || currentStream) && (
-                   <div className="p-3 rounded-xl liquid-panel text-white">
-                     <div className="font-semibold mb-1">{isStreaming ? "Thinking..." : "Response"}</div>
-                     <div className="whitespace-pre-wrap">
-                       {agentMode === 'chat' && isStreaming ? null : currentStream}
-                       {isStreaming && (<span className="inline-block w-0.5 h-4 bg-white ml-1 animate-pulse"></span>)}
-                     </div>
-                   </div>
-                 )}
-
-
-                 
-                 <div ref={messagesEndRef} />
-               </div>
-               
-               {/* Input Area - Fixed at the bottom of the panel */}
-               <div className="border-t border-white/10 p-3 bg-white/[0.02]">
-                 <form onSubmit={handleSubmit} className="relative">
-                   <input
-                     ref={inputRef}
-                     value={prompt}
-                     onChange={(e) => setPrompt(e.target.value)}
-                     placeholder={
-                       isStreaming
-                                 ? "Thinking..."
-        : false
-                         ? "Ask me to help you with complex tasks..."
-                         : "Chat with me or ask about your screen..."
-                     }
-                     disabled={isStreaming}
-                     onFocus={() => {
-                       window.ipcRenderer.send('chat:focus');
-                       if (inputRef.current) {
-                         inputRef.current.style.pointerEvents = 'auto';
-                       }
-                     }}
-                     className="dark-input pr-14 app-region-no-drag w-full"
-                   />
-                   <div className="absolute right-4 top-1/2 -translate-y-1/2">
-                     <div className="flex gap-2 items-center">
-                       <div className="flex gap-1 items-center opacity-70">
-                         <span className="text-xs">↵</span>
-                         <span className="text-xs">send</span>
-                         <span className="mx-1">•</span>
-                         <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 3a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3H6a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3V6a3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3h12a3 3 0 0 0 3-3 3 3 0 0 0-3-3z"/></svg>
-                         <span className="text-xs">↵</span>
-                         <span className="text-xs">close</span>
-                       </div>
-                     </div>
-                   </div>
-                 </form>
-               </div>
-              </div>
-            </div>
-          )}
+            {/* Regular Chat/Command Content - Hidden, we'll show just the input bar below */}
 
           </div>
         </div>
 
+      </div>
+
+      {/* Input bars - positioned right under main bar */}
+      <div className="fixed top-11 left-1/2 transform -translate-x-1/2 z-40">
+        {/* Ask Input Bar - exactly like agent mode */}
+        {agentMode === "chat" && isChatPaneVisible && !isLiveMode && !highlightChatVisible && (
+          <div className="pointer-events-auto" style={{ width: '420px', minWidth: '380px', maxWidth: '440px' }}>
+            <div className="glass-chat-input-area">
+              <AskAgent />
+            </div>
+          </div>
+        )}
+
         {/* Agent Input Bar - just the input bar */}
         {agentMode === "agent" && (
-          <div className="mx-auto pointer-events-auto" style={{ width: '420px', minWidth: '380px', maxWidth: '440px' }}>
-            {isChromeActive ? <ChromeAgent /> : <MacOSAgent />}
+          <div className="pointer-events-auto" style={{ width: '420px', minWidth: '380px', maxWidth: '440px' }}>
+            <div className="glass-chat-input-area">
+              {isChromeActive ? <ChromeAgent /> : <MacOSAgent />}
+            </div>
           </div>
         )}
       </div>
+    </div>
   );
 }
 

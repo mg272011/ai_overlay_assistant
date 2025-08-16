@@ -82,21 +82,9 @@ class GlassListenService {
         // Send to renderer for display
         this.sendToRenderer('transcription-complete', turn);
         
-        // Generate contextual actions for BOTH speakers directly in main process
-        if (text && text.trim().length > 6) {
-            try {
-                this.contextualActionsService.addConversationTurn(speaker, text);
-                const results = await this.contextualActionsService.generateContextualActions(text, speaker);
-                if (results?.searchItems?.length) {
-                    this.sendToRenderer('contextual-search', results.searchItems);
-                }
-                if (results?.suggestions?.length) {
-                    this.sendToRenderer('contextual-suggestions', results.suggestions);
-                }
-            } catch (err) {
-                console.warn('[Glass-Meeting] Contextual action generation failed:', err);
-            }
-        }
+        // REMOVED: No longer generate contextual actions on every transcription
+        // This was causing the garbage "what is search" type actions
+        // Contextual actions are now only triggered when analysis/summary is ready
     }
 
     async initializeSession(language = 'en') {

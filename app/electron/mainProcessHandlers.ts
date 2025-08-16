@@ -347,27 +347,10 @@ export function setupMainHandlers({ win }: { win: InstanceType<typeof BrowserWin
   // Generate contextual actions on demand from renderer (e.g., per final turn)
   ipcMain.on('generate-contextual-actions', async (_evt, payload: { text: string; speaker: string }) => {
     try {
-      // Agent functionality removed - use lightweight service instance
-      if (!contextualActionsSvc) contextualActionsSvc = new ContextualActionsService();
-      contextualActionsSvc.addConversationTurn(payload.speaker, payload.text);
-      const results = await contextualActionsSvc.generateContextualActions(payload.text, payload.speaker);
-      if (results.searchItems?.length) {
-        win?.webContents.send('contextual-search', results.searchItems);
-      }
-      if (results.suggestions?.length) {
-        win?.webContents.send('contextual-suggestions', results.suggestions);
-      }
-    } catch (err) {
-      console.warn('[MainHandlers] generate-contextual-actions failed:', err);
-    }
-  });
-
-  // NEW: Handle contextual actions from Glass meeting service (for ALL speakers)
-  ipcMain.on('generate-contextual-actions-request', async (_evt, payload: { text: string; speaker: string }) => {
-    try {
-      console.log('[MainHandlers] ✅ Received generate-contextual-actions-request');
+      console.log('[MainHandlers] 🚀 Received generate-contextual-actions');
       console.log('[MainHandlers] Generating contextual actions for:', payload.speaker, '-', payload.text?.substring(0, 80));
       
+      // Agent functionality removed - use lightweight service instance
       if (!contextualActionsSvc) {
         console.log('[MainHandlers] Creating new ContextualActionsService instance');
         contextualActionsSvc = new ContextualActionsService();
@@ -376,24 +359,32 @@ export function setupMainHandlers({ win }: { win: InstanceType<typeof BrowserWin
       contextualActionsSvc.addConversationTurn(payload.speaker, payload.text);
       const results = await contextualActionsSvc.generateContextualActions(payload.text, payload.speaker);
       
-      console.log('[MainHandlers] ✅ Generated results:', {
+      console.log('[MainHandlers] 🚀 Generated results:', {
         searchItems: results.searchItems?.length || 0,
         suggestions: results.suggestions?.length || 0,
-        items: results.searchItems?.map(item => item.text)
+        searchTexts: results.searchItems?.map(item => item.text),
+        suggestionTexts: results.suggestions?.map(item => item.text)
       });
       
       if (results.searchItems?.length) {
         console.log('[MainHandlers] Sending contextual-search event with', results.searchItems.length, 'items');
         win?.webContents.send('contextual-search', results.searchItems);
+      } else {
+        console.log('[MainHandlers] No search items to send');
       }
+      
       if (results.suggestions?.length) {
         console.log('[MainHandlers] Sending contextual-suggestions event with', results.suggestions.length, 'items');
         win?.webContents.send('contextual-suggestions', results.suggestions);
+      } else {
+        console.log('[MainHandlers] No suggestions to send');
       }
     } catch (err) {
-      console.error('[MainHandlers] ❌ generate-contextual-actions-request failed:', err);
+      console.error('[MainHandlers] ❌ generate-contextual-actions failed:', err);
     }
   });
+
+
 
   // Start a per-action meeting chat (separate from the main chat)
   ipcMain.on('start-meeting-chat', async (event, payload: { chatId: string; action: any }) => {
@@ -1830,11 +1821,12 @@ Do NOT describe the screen. Do NOT add anything else. Just use the exact format 
 
   ipcMain.on("stop-browser-monitoring", async (_event) => {
     try {
-      console.log('[MainHandlers] Stopping NanoBrowser agent mode');
-      // For NanoBrowser, we don't have any services to stop
-      // Just log that we're closing
+      console.log('[MainHandlers] Stopping browser monitoring for agent mode');
+      browserDetection.stopMonitoring();
+      browserDetection.removeAllListeners('browser-detected');
+      console.log('[MainHandlers] Browser monitoring stopped successfully');
     } catch (error) {
-      console.error('[MainHandlers] Error stopping NanoBrowser agent:', error);
+      console.error('[MainHandlers] Error stopping browser monitoring:', error);
     }
   });
 
@@ -1863,19 +1855,76 @@ Do NOT describe the screen. Do NOT add anything else. Just use the exact format 
     }
   });
 
+  // Start browser monitoring for agent mode
+  ipcMain.on("start-browser-monitoring", async (event) => {
+    try {
+      console.log('[MainHandlers] Starting browser monitoring for agent mode');
+      await browserDetection.startMonitoring();
+      
+      // Listen for browser detection events
+      const handleBrowserDetected = (browserInfo: any) => {
+        console.log('[MainHandlers] Browser detected:', browserInfo);
+        const isChromeActive = browserInfo.name === 'Google Chrome';
+        if (isChromeActive) {
+          console.log('[MainHandlers] Chrome detected - sending auto-switch signal');
+          mainWindow?.webContents.send('browser-detected', { 
+            browserName: browserInfo.name, 
+            isChromeActive: true 
+          });
+        }
+      };
+      
+      // Remove any existing listeners first
+      browserDetection.removeAllListeners('browser-detected');
+      
+      // Add new listener
+      browserDetection.on('browser-detected', handleBrowserDetected);
+      
+      event.reply("browser-monitoring-started", true);
+    } catch (error) {
+      console.error('[MainHandlers] Error starting browser monitoring:', error);
+      event.reply("browser-monitoring-started", false);
+    }
+  });
+
   // Open Chrome browser
   ipcMain.on("open-chrome", async (_event) => {
     try {
+      console.log('[MainHandlers] Opening Chrome and setting fullscreen...');
+      
+      // First activate Chrome
       await execPromise(`osascript -e 'tell application "Google Chrome" to activate'`);
-      // Try to create a new window if needed
+      
+      // Wait a moment for Chrome to activate
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      // Just activate Chrome (no fullscreen here - let nanobrowser handle it)
       try {
-        await execPromise(`osascript -e 'tell application "Google Chrome" to make new window'`);
-      } catch {
-        // Window creation might fail if Chrome is already open, that's ok
+        await execPromise(`osascript -e '
+          tell application "Google Chrome"
+            if (count of windows) is 0 then
+              make new window
+            end if
+            activate
+          end tell'`);
+        console.log('[MainHandlers] Chrome activated successfully');
+      } catch (windowError) {
+        console.log('[MainHandlers] Chrome activation failed:', windowError);
       }
-      console.log('[MainHandlers] Chrome opened successfully');
+      
+      console.log('[MainHandlers] Chrome opened and activated successfully');
     } catch (error) {
       console.error('[MainHandlers] Error opening Chrome:', error);
+    }
+  });
+
+  // Handle Chrome agent activation (for continuing tasks)
+  ipcMain.on("chrome-agent-activated", async (_event) => {
+    try {
+      console.log('[MainHandlers] Chrome agent activated - ready to continue tasks');
+      // The task will automatically continue in Chrome agent since it's now active
+    } catch (error) {
+      console.error('[MainHandlers] Error handling Chrome agent activation:', error);
     }
   });
 
@@ -1883,26 +1932,57 @@ Do NOT describe the screen. Do NOT add anything else. Just use the exact format 
   ipcMain.on("nanobrowser-command", async (event, command: string) => {
     try {
       console.log('[MainHandlers] NanoBrowser command received:', command);
-      
-      // For now, just echo back a response
-      // In production, this would process the command through the browser automation
-      setTimeout(() => {
-        const response = `I received your command: "${command}". Browser automation would execute here.`;
-        event.reply("nanobrowser-response", response);
-      }, 1000);
+
+      // Gently bring Chrome to foreground if needed
+      try {
+        await execPromise(`osascript -e 'tell application "Google Chrome" to activate'`);
+        await new Promise(r => setTimeout(r, 200));
+      } catch {}
+
+      // Prefer structured execution via executor
+      console.log('[MainHandlers] Importing executor...');
+      const { buildActionPlanFromCommand, executeActionPlan } = await import('./services/chrome/executor.ts');
+      console.log('[MainHandlers] Building action plan for command:', command);
+      const plan = buildActionPlanFromCommand(command);
+      console.log('[MainHandlers] Action plan:', plan);
+      console.log('[MainHandlers] Executing action plan...');
+      await executeActionPlan(plan, event, 'nanobrowser-response');
+      console.log('[MainHandlers] Action plan completed');
+
     } catch (error) {
       console.error('[MainHandlers] Error processing NanoBrowser command:', error);
-      event.reply("nanobrowser-response", `Error: ${error}`);
+      event.reply('nanobrowser-response', `Error: ${error}`);
     }
   });
 
   // Handle NanoBrowser stop
-  ipcMain.on("nanobrowser-stop", async (_event) => {
+  ipcMain.on("nanobrowser-stop", async (event) => {
     try {
-      console.log('[MainHandlers] NanoBrowser stop requested');
-      // Stop any ongoing browser automation
+      console.log('[MainHandlers] 🛑 NanoBrowser stop requested');
+      
+      // Stop any ongoing Chrome automation
+      const chrome = await import('./services/chrome/ChromeDevtoolsService');
+      const chromeService = chrome.default; // Already an instance
+      
+      // Try to close the browser instance if it exists
+      try {
+        if (chromeService && (chromeService as any).browser) {
+          console.log('[MainHandlers] Closing Chrome browser instance...');
+          await (chromeService as any).browser.close();
+          (chromeService as any).browser = null;
+          (chromeService as any).page = null;
+        }
+      } catch (closeError) {
+        console.warn('[MainHandlers] Error closing Chrome:', closeError);
+      }
+      
+      // Send confirmation back to UI
+      event.reply('nanobrowser-response', '🛑 Agent stopped successfully');
+      console.log('[MainHandlers] ✅ NanoBrowser stopped successfully');
+      
     } catch (error) {
-      console.error('[MainHandlers] Error stopping NanoBrowser:', error);
+      console.error('[MainHandlers] ❌ Error stopping NanoBrowser:', error);
+      event.reply('nanobrowser-response', `❌ Error stopping: ${error}`);
     }
   });
 
@@ -1924,7 +2004,130 @@ Do NOT describe the screen. Do NOT add anything else. Just use the exact format 
         return;
       }
       
-      // Use Gemini to determine intent and generate response
+      // Check for complex browser tasks that require Chrome + nanobrowser
+      const complexBrowserTasks = [
+        'flight', 'book', 'hotel', 'reservation', 'buy', 'purchase', 'shop', 'order',
+        'form', 'signup', 'login', 'account', 'checkout', 'cart', 'search for',
+        'find me', 'look for', 'browse', 'website', 'site'
+      ];
+      
+      const isComplexTask = complexBrowserTasks.some(task => lowerInput.includes(task)) || 
+                           (lowerInput.includes('open') && lowerInput.includes('chrome')) ||
+                           lowerInput.length > 50; // Long requests likely need browser automation
+      
+      if (isComplexTask) {
+        console.log('[MainHandlers] Detected complex browser task, checking Chrome status...');
+        
+        // First check if Chrome is actually visible and in fullscreen
+        let chromeIsVisible = false;
+        try {
+          const result = await execPromise(`osascript -e '
+            tell application "System Events"
+              set chromeVisible to false
+              set chromeFullscreen to false
+              try
+                tell process "Google Chrome"
+                  set chromeVisible to frontmost
+                  if chromeVisible then
+                    try
+                      set windowCount to count of windows
+                      if windowCount > 0 then
+                        tell window 1
+                          set chromeFullscreen to (get value of attribute "AXFullScreen")
+                        end tell
+                      end if
+                    end try
+                  end if
+                end tell
+              end try
+              return (chromeVisible as string) & "," & (chromeFullscreen as string)
+            end tell'`);
+          
+          const [visible, fullscreen] = result.stdout.trim().split(',');
+          chromeIsVisible = visible === 'true' && fullscreen === 'true';
+          console.log('[MainHandlers] Chrome visible and fullscreen:', chromeIsVisible);
+        } catch (checkError) {
+          console.log('[MainHandlers] Chrome status check failed:', checkError);
+        }
+        
+        // If Chrome is not visible and fullscreen, use AppleScript to open/activate it
+        if (!chromeIsVisible) {
+          console.log('[MainHandlers] Chrome not visible/fullscreen, using AppleScript to activate...');
+          
+          event.reply('gemini-macos-response', {
+            type: 'browser_action',
+            content: 'I can help with that! Let me open Chrome in fullscreen and then handle your request...'
+          });
+          
+          try {
+            await new Promise<void>((resolve, reject) => {
+              const timeout = setTimeout(() => reject(new Error('Chrome opening timeout')), 10000);
+              
+              const openChrome = async () => {
+                try {
+                  console.log('[MainHandlers] Opening Chrome and setting fullscreen...');
+                  
+                  // First activate Chrome
+                  await execPromise(`osascript -e 'tell application "Google Chrome" to activate'`);
+                  
+                  // Wait for Chrome to activate
+                  await new Promise(resolve => setTimeout(resolve, 1000));
+                  
+                  // Just activate Chrome (ChromeDevtoolsService will handle fullscreen properly)
+                  try {
+                    await execPromise(`osascript -e '
+                      tell application "Google Chrome"
+                        if (count of windows) is 0 then
+                          make new window
+                        end if
+                        activate
+                      end tell'`);
+                    console.log('[MainHandlers] Chrome activated - ChromeDevtoolsService will handle fullscreen');
+                  } catch (windowError) {
+                    console.log('[MainHandlers] Chrome activation setup failed:', windowError);
+                  }
+                  
+                  // Wait for Chrome to be fully ready
+                  await new Promise(resolve => setTimeout(resolve, 2000));
+                  
+                  console.log('[MainHandlers] Chrome opened and ready');
+                  clearTimeout(timeout);
+                  resolve();
+                } catch (error) {
+                  clearTimeout(timeout);
+                  reject(error);
+                }
+              };
+              
+              openChrome();
+            });
+            
+            // Now store the task for the Chrome agent to pick up
+            process.env.PENDING_AGENT_TASK = userInput;
+            
+          } catch (error) {
+            console.error('[MainHandlers] Error opening Chrome:', error);
+            event.reply('gemini-macos-response', {
+              type: 'conversation',
+              content: 'I had trouble opening Chrome in fullscreen. Please try opening it manually and then ask me again.'
+            });
+          }
+          return;
+        } else {
+          console.log('[MainHandlers] Chrome is already visible and fullscreen, proceeding with browser automation...');
+          // Chrome is already visible and fullscreen, proceed with nanobrowser
+          event.reply('gemini-macos-response', {
+            type: 'browser_action',
+            content: 'I can help with that! Chrome is ready - I\'ll use browser automation to handle your request...'
+          });
+          
+          // Store the task for the Chrome agent
+          process.env.PENDING_AGENT_TASK = userInput;
+          return;
+        }
+      }
+      
+      // Use Gemini to determine intent and generate response for simple tasks
       const prompt = `You are a browser automation assistant for macOS. Your main job is to help with browser commands, not general conversation.
 
 User input: "${userInput}"
@@ -3032,5 +3235,15 @@ async function executePlan(
       console.log(`[Plan] Step ${step.id} skipped - agent functionality disabled`);
     }
   }
-}
+  }
+
+  // Handle pending agent task retrieval
+  ipcMain.handle("get-pending-agent-task", async () => {
+    return process.env.PENDING_AGENT_TASK || null;
+  });
+
+  // Handle pending agent task clearing
+  ipcMain.on("clear-pending-agent-task", async () => {
+    delete process.env.PENDING_AGENT_TASK;
+  });
 }

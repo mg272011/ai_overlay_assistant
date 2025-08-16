@@ -104,7 +104,7 @@ export class ScreenHighlightService {
         
         #instructions {
           position: fixed;
-          top: 80px;
+          top: 110px;
           left: 50%;
           transform: translateX(-50%);
           background: rgba(0, 0, 0, 0.9);
@@ -121,11 +121,11 @@ export class ScreenHighlightService {
         
         #controls {
           position: fixed;
-          top: 50%;
-          right: 30px;
-          transform: translateY(-50%);
+          top: 160px;
+          left: 50%;
+          transform: translateX(-50%);
           display: flex;
-          flex-direction: column;
+          flex-direction: row;
           gap: 12px;
           z-index: 1000;
           pointer-events: auto; /* Make controls clickable */

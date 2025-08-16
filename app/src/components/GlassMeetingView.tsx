@@ -123,13 +123,8 @@ export const GlassMeetingView: React.FC<GlassMeetingViewProps> = ({ onActionClic
         return updated;
       });
       
-      // Ask main process to generate contextual actions/suggestions for the OTHER party only
-      try {
-        const spk = (turn.speaker || '').toLowerCase();
-        if (spk === 'them' || spk === 'system' || spk === 'interviewer') {
-          window.ipcRenderer.send('generate-contextual-actions', { text: turn.text, speaker: turn.speaker });
-        }
-      } catch {}
+      // NO LONGER trigger contextual actions here - wait for analysis instead
+      // This prevents generating bad search actions on every single transcription
       
       // Auto-scroll to bottom
       setTimeout(() => {
@@ -142,7 +137,6 @@ export const GlassMeetingView: React.FC<GlassMeetingViewProps> = ({ onActionClic
       console.log('[Glass Meeting View] Analysis update:', analysis);
       setCurrentAnalysis(analysis);
       
-      // IMPORTANT: Extract BOTH questions AND searches from analysis!
       // Extract questions as suggestions
       if (analysis.questions && analysis.questions.length > 0) {
         console.log('[Glass Meeting View] Found questions in analysis:', analysis.questions);
@@ -156,8 +150,17 @@ export const GlassMeetingView: React.FC<GlassMeetingViewProps> = ({ onActionClic
         console.log('[Glass Meeting View] Set suggestions from analysis questions:', questionSuggestions);
       }
       
-      // DO NOT extract searches from analysis - they come from ContextualActions service!
-      // The analysis contains different data, not the search actions we want to display
+      // NOW trigger contextual actions since we have proper analysis/summary
+      if (analysis.summary && analysis.summary.length > 0) {
+        console.log('[Glass Meeting View] Analysis ready, triggering contextual actions');
+        const recentConversation = conversationHistory.slice(-3).map(turn => turn.text).join(' ');
+        if (recentConversation.length > 50) {
+          window.ipcRenderer.send('generate-contextual-actions', { 
+            text: recentConversation, 
+            speaker: 'analysis' 
+          });
+        }
+      }
     };
     
     // Analysis complete (same as update but for clarity)
@@ -165,7 +168,6 @@ export const GlassMeetingView: React.FC<GlassMeetingViewProps> = ({ onActionClic
       console.log('[Glass Meeting View] Analysis complete:', analysis);
       setCurrentAnalysis(analysis);
       
-      // IMPORTANT: Extract BOTH questions AND searches from analysis!
       // Extract questions as suggestions
       if (analysis.questions && analysis.questions.length > 0) {
         console.log('[Glass Meeting View] Found questions in analysis complete:', analysis.questions);
@@ -179,8 +181,15 @@ export const GlassMeetingView: React.FC<GlassMeetingViewProps> = ({ onActionClic
         console.log('[Glass Meeting View] Set suggestions from analysis complete:', questionSuggestions);
       }
       
-      // DO NOT extract searches from analysis - they come from ContextualActions service!
-      // The analysis contains different data, not the search actions we want to display
+      // Trigger contextual actions with the full analysis context
+      if (analysis.summary && analysis.summary.length > 0) {
+        console.log('[Glass Meeting View] Analysis complete, triggering final contextual actions');
+        const fullContext = analysis.summary.join(' ') + ' ' + conversationHistory.slice(-2).map(turn => turn.text).join(' ');
+        window.ipcRenderer.send('generate-contextual-actions', { 
+          text: fullContext, 
+          speaker: 'analysis-complete' 
+        });
+      }
     };
 
     // Status updates
@@ -222,11 +231,12 @@ export const GlassMeetingView: React.FC<GlassMeetingViewProps> = ({ onActionClic
 
     // Contextual search items from ContextualActions service
     const handleContextualSearch = (_: any, data: any) => {
-      console.log('[Glass Meeting View] 🔍 Raw contextual search data:', data);
+      console.log('[Glass Meeting View] 🔍 ===== CONTEXTUAL SEARCH EVENT RECEIVED =====');
+      console.log('[Glass Meeting View] 🔍 Raw contextual search data:', JSON.stringify(data, null, 2));
       
       // Handle both array and object with searchItems property
       const items = Array.isArray(data) ? data : (data?.searchItems || data);
-      console.log('[Glass Meeting View] 🔍 Processed search items:', items);
+      console.log('[Glass Meeting View] 🔍 Processed search items:', JSON.stringify(items, null, 2));
       
       if (Array.isArray(items) && items.length > 0) {
         // Format items properly
@@ -239,20 +249,24 @@ export const GlassMeetingView: React.FC<GlassMeetingViewProps> = ({ onActionClic
         }));
         
         setSearchItems(formattedItems);
-        console.log('[Glass Meeting View] 🔍 SET search items from ContextualActions:', formattedItems);
+        console.log('[Glass Meeting View] 🔍 ✅ SET search items from ContextualActions:', JSON.stringify(formattedItems, null, 2));
+        console.log('[Glass Meeting View] 🔍 ✅ Current searchItems state after setting:', formattedItems.length);
       } else {
-        console.log('[Glass Meeting View] 🔍 No search items to display from ContextualActions');
+        console.log('[Glass Meeting View] 🔍 ❌ No search items to display from ContextualActions - items:', items);
+        console.log('[Glass Meeting View] 🔍 ❌ Array.isArray(items):', Array.isArray(items));
+        console.log('[Glass Meeting View] 🔍 ❌ items?.length:', items?.length);
       }
     };
 
     // Meeting suggestions - DO NOT OVERWRITE WITH EMPTY DATA
     const handleContextualSuggestions = (_: any, data: any) => {
-      console.log('[Glass Meeting View] Raw contextual suggestions data:', data);
-      console.log('[Glass Meeting View] Current suggestions before update:', suggestions);
+      console.log('[Glass Meeting View] 🌟 ===== CONTEXTUAL SUGGESTIONS EVENT RECEIVED =====');
+      console.log('[Glass Meeting View] 🌟 Raw contextual suggestions data:', JSON.stringify(data, null, 2));
+      console.log('[Glass Meeting View] 🌟 Current suggestions before update:', suggestions);
       
       // IMPORTANT: Ignore empty arrays from ContextualActions service
       if (Array.isArray(data) && data.length === 0) {
-        console.log('[Glass Meeting View] IGNORING empty contextual suggestions array - keeping existing questions');
+        console.log('[Glass Meeting View] 🌟 ❌ IGNORING empty contextual suggestions array - keeping existing questions');
         return; // DO NOT overwrite existing suggestions with empty array
       }
       
@@ -263,12 +277,12 @@ export const GlassMeetingView: React.FC<GlassMeetingViewProps> = ({ onActionClic
         items = data.suggestions || data.questions || data.items || data;
       }
       
-      console.log('[Glass Meeting View] Processed contextual suggestions:', items);
+      console.log('[Glass Meeting View] 🌟 Processed contextual suggestions:', JSON.stringify(items, null, 2));
       
       // Only set if we have actual items (not empty array)
       if (Array.isArray(items) && items.length > 0) {
         setSuggestions(items);
-        console.log('[Glass Meeting View] SET suggestions state with', items.length, 'contextual items');
+        console.log('[Glass Meeting View] 🌟 ✅ SET suggestions state with', items.length, 'contextual items');
       } else if (items && typeof items === 'object' && Object.keys(items).length > 0) {
         // If still an object with content, try to convert to array
         setSuggestions([items]);
@@ -431,8 +445,11 @@ export const GlassMeetingView: React.FC<GlassMeetingViewProps> = ({ onActionClic
                 marginTop: '8px',
                 visibility: 'visible' as any,
                 opacity: 1,
-                background: 'rgba(255, 165, 0, 0.1)',
-                border: '1px solid rgba(255, 165, 0, 0.3)'
+                background: 'rgba(0, 0, 0, 0.3)',
+                backdropFilter: 'blur(20px) saturate(180%) contrast(120%) brightness(110%) hue-rotate(5deg)',
+                border: '0.5px solid rgba(255, 255, 255, 0.3)',
+                borderRadius: '12px',
+                boxShadow: '0 8px 32px rgba(31, 38, 135, 0.15), 0 4px 16px rgba(255, 255, 255, 0.1) inset'
               }}>
                 <h4 className="contextual-actions-title" style={{ color: '#ffffff' }}>
                   Actions ({searchItems.length} items)
@@ -497,8 +514,11 @@ export const GlassMeetingView: React.FC<GlassMeetingViewProps> = ({ onActionClic
                 marginTop: '8px', 
                 visibility: 'visible' as any, 
                 opacity: 1,
-                background: 'rgba(52, 199, 89, 0.1)',
-                border: '1px solid rgba(52, 199, 89, 0.3)'
+                background: 'rgba(0, 0, 0, 0.3)',
+                backdropFilter: 'blur(20px) saturate(180%) contrast(120%) brightness(110%) hue-rotate(5deg)',
+                border: '0.5px solid rgba(255, 255, 255, 0.3)',
+                borderRadius: '12px',
+                boxShadow: '0 8px 32px rgba(31, 38, 135, 0.15), 0 4px 16px rgba(255, 255, 255, 0.1) inset'
               }}>
                 <h4 className="contextual-actions-title" style={{ color: '#ffffff' }}>
                   What should I say next ({suggestions.length} questions)
