@@ -52,6 +52,10 @@ contextBridge.exposeInMainWorld("ipcRenderer", {
 
   // Window control APIs
   setIgnoreMouseEvents: (ignore: boolean) => ipcRenderer.send("set-ignore-mouse-events", ignore),
+  
+  // Advanced mouse detection APIs
+  mouseEnterInteractive: () => ipcRenderer.send("mouse:enter-interactive"),
+  mouseLeaveInteractive: () => ipcRenderer.send("mouse:leave-interactive"),
 
   // Custom APIs for renderer
   enableLoopback: () => ipcRenderer.invoke("enable-loopback-audio"),

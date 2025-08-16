@@ -133,10 +133,8 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
           {/* Thinking state with glare */}
           {isThinking && (
             <div className="flex justify-start message-enter">
-              <div className="bg-white/10 text-white px-4 py-3 rounded-2xl rounded-tl-sm relative overflow-hidden">
-                <p className="text-sm relative z-10">Thinking...</p>
-                {/* Glare effect */}
-                <div className="absolute inset-0 thinking-glare"></div>
+              <div className="bg-white/10 text-white px-4 py-3 rounded-2xl rounded-tl-sm">
+                <p className="text-sm thinking-text">Thinking...</p>
               </div>
             </div>
           )}

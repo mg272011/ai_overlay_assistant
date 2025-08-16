@@ -37,7 +37,7 @@ class ChromeDevtoolsService {
   public async ensureStarted(): Promise<void> {
     if (this.browser && this.page) return;
 
-    console.log('[ChromeDevtools] Starting Chrome...');
+    console.log('[ChromeDevtools] Starting Chrome with debug script...');
     const executablePath = await this.getChromeExecutablePath();
     console.log('[ChromeDevtools] Chrome executable path:', executablePath);
     
@@ -49,48 +49,28 @@ class ChromeDevtoolsService {
     const puppeteer = await import("puppeteer");
     
     try {
-      // First try to connect to user's existing Chrome (port 9222)
-      console.log('[ChromeDevtools] Trying to connect to main Chrome on port 9222...');
+      // Try to connect to existing nanobrowser Chrome instance on port 9223
+      console.log('[ChromeDevtools] Trying to connect to existing nanobrowser Chrome...');
       this.browser = await puppeteer.connect({
-        browserURL: 'http://localhost:9222',
+        browserURL: 'http://localhost:9223',
         defaultViewport: null,
       });
-      console.log('[ChromeDevtools] ✅ Connected to existing main Chrome - using it');
+      console.log('[ChromeDevtools] ✅ Connected to existing nanobrowser Chrome instance');
+    } catch (nanobrowserConnectError) {
+      console.log('[ChromeDevtools] No existing nanobrowser Chrome found, launching a dedicated instance...');
 
-      // Skip launching new instance since we connected to existing
-      const pages = await this.browser.pages();
-      this.page = pages && pages.length ? pages[0] : await this.browser.newPage();
+      // Launch dedicated nanobrowser Chrome on 9223 with its own profile
+      await this.autoStartNanobrowserChrome(userDataDir, executablePath || undefined);
 
-      // Do not modify AppleScript logic here
-      return; // Early return since we're using existing Chrome
+      // Wait for 9223 to be ready
+      await this.waitForDebugPort(9223, 15);
 
-    } catch (mainChromeConnectError) {
-      console.log('[ChromeDevtools] Main Chrome not available on 9222, trying nanobrowser on 9223...');
-
-      try {
-        // Try to connect to existing nanobrowser Chrome instance on port 9223
-        console.log('[ChromeDevtools] Trying to connect to existing nanobrowser Chrome...');
-        this.browser = await puppeteer.connect({
-          browserURL: 'http://localhost:9223',
-          defaultViewport: null,
-        });
-        console.log('[ChromeDevtools] ✅ Connected to existing nanobrowser Chrome instance');
-      } catch (nanobrowserConnectError) {
-        console.log('[ChromeDevtools] No existing nanobrowser Chrome found, launching a dedicated instance (no restart of your Chrome)...');
-
-        // Launch dedicated nanobrowser Chrome on 9223 with its own profile (do NOT kill user's Chrome)
-        await this.autoStartNanobrowserChrome(userDataDir, executablePath || undefined);
-
-        // Wait for 9223 to be ready
-        await this.waitForDebugPort(9223, 15);
-
-        // Connect to nanobrowser Chrome
-        this.browser = await (await import('puppeteer')).connect({
-          browserURL: 'http://localhost:9223',
-          defaultViewport: null,
-        });
-        console.log('[ChromeDevtools] ✅ Connected to launched nanobrowser Chrome');
-      }
+      // Connect to nanobrowser Chrome
+      this.browser = await (await import('puppeteer')).connect({
+        browserURL: 'http://localhost:9223',
+        defaultViewport: null,
+      });
+      console.log('[ChromeDevtools] ✅ Connected to launched nanobrowser Chrome');
     }
 
     try {
@@ -98,16 +78,31 @@ class ChromeDevtoolsService {
       this.page = pages && pages.length ? pages[0] : await this.browser.newPage();
       console.log('[ChromeDevtools] ✅ Got page, bringing to foreground...');
 
-      // Just bring Chrome to the foreground (no fullscreen for now - less intrusive)
+      // Launch Chrome in fullscreen and ensure Opus stays on top
       try {
         await runAppleScript(`
           tell application "Google Chrome" to activate
-          delay 0.3
+          delay 0.5
+          tell application "System Events"
+            tell process "Google Chrome"
+              key code 3 using {command down, shift down}
+            end tell
+          end tell
+          delay 0.5
         `);
-        console.log('[ChromeDevtools] ✅ Successfully activated Chrome (windowed mode)');
+        console.log('[ChromeDevtools] ✅ Successfully activated Chrome in fullscreen');
         
-        // Make sure Opus stays visible
-        await runAppleScript(`tell application "Opus" to activate`);
+        // Ensure Opus stays visible and on top
+        await runAppleScript(`
+          tell application "Opus" to activate
+          delay 0.3
+          tell application "System Events"
+            tell process "Opus"
+              set frontmost to true
+            end tell
+          end tell
+        `);
+        console.log('[ChromeDevtools] ✅ Opus overlay repositioned and stays on top');
         
       } catch (scriptError) {
         console.error('[ChromeDevtools] ❌ AppleScript error:', scriptError);

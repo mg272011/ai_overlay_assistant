@@ -35,6 +35,19 @@ function App() {
   const [recordingTime, setRecordingTime] = useState(0); void recordingTime;
   const recordingIntervalRef = useRef<NodeJS.Timeout | null>(null);
   
+  // Chat panel state for Ask/Agent modes
+  const [chatPanelVisible, setChatPanelVisible] = useState(false);
+  const [isThinking, setIsThinking] = useState(false);
+  const [currentResponse, setCurrentResponse] = useState<string>('');
+  const [displayedResponse, setDisplayedResponse] = useState<string>('');
+  const [isTyping, setIsTyping] = useState(false);
+  const [chatPanelMode, setChatPanelMode] = useState<'ask' | 'agent' | 'select'>('ask');
+  const [selectImage, setSelectImage] = useState<string | null>(null);
+  const [conversationHistory, setConversationHistory] = useState<Array<{role: 'user' | 'assistant', content: string, id: string}>>([]);
+  const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const chatScrollRef = useRef<HTMLDivElement>(null);
+  const currentAssistantMessageRef = useRef<string | null>(null);
+  
   // Action-driven Meeting Chats (separate from regular chat)
   type MeetingChat = {
     id: string;
@@ -73,12 +86,220 @@ function App() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const menuCloseTimerRef = useRef<NodeJS.Timeout | null>(null);
   
+  // Double-press detection for listen mode
+  const lastListenPressRef = useRef<number>(0);
+  const DOUBLE_PRESS_TIMEOUT = 300; // 300ms window for double press
+  
   // Clean state - no more chat window complexity
   
   // Debug menu state changes
   useEffect(() => {
     console.log('[Menu State Changed] isMenuOpen:', isMenuOpen);
   }, [isMenuOpen]);
+
+  // Handle message sent from Ask/Agent modes
+  const handleMessageSent = (message: string, mode: 'ask' | 'agent' | 'select' = 'ask') => {
+    console.log('[Chat Panel] Message sent:', message, 'mode:', mode);
+    
+    // Clear conversation history if switching modes
+    if (chatPanelMode !== mode) {
+      setConversationHistory([]);
+    }
+    
+    // Add user message to conversation history
+    const userMessageId = `user-${Date.now()}`;
+    setConversationHistory(prev => [...prev, {
+      role: 'user',
+      content: message,
+      id: userMessageId
+    }]);
+    
+    // Only show thinking state for ask and select modes, not agent mode
+    setIsThinking(mode !== 'agent');
+    setCurrentResponse('');
+    setDisplayedResponse('');
+    setIsTyping(false);
+    setChatPanelMode(mode);
+    setChatPanelVisible(true);
+    currentAssistantMessageRef.current = null;
+  };
+
+  // Handle select mode message with image
+  const handleSelectMessage = (message: string, imageData: string) => {
+    console.log('[Chat Panel] Select message sent:', message);
+    
+    // Clear conversation history if switching modes
+    if (chatPanelMode !== 'select') {
+      setConversationHistory([]);
+    }
+    
+    // Add user message to conversation history
+    const userMessageId = `user-${Date.now()}`;
+    setConversationHistory(prev => [...prev, {
+      role: 'user',
+      content: message,
+      id: userMessageId
+    }]);
+    
+    setIsThinking(true);
+    setCurrentResponse('');
+    setChatPanelMode('select');
+    setSelectImage(imageData);
+    setChatPanelVisible(true);
+    currentAssistantMessageRef.current = null;
+    
+    // Hide the old highlight chat
+    setHighlightChatVisible(false);
+  };
+
+  // Listen for responses to update the chat panel
+  useEffect(() => {
+    const handleAskResponse = (_event: any, response: string) => {
+      console.log('[Chat Panel] Ask response received:', response);
+      setIsThinking(false);
+      setCurrentResponse(response);
+    };
+
+    const handleNanobrowserResponse = (_event: any, response: string) => {
+      console.log('[Chat Panel] Agent response received:', response);
+      setIsThinking(false);
+      setCurrentResponse(response);
+    };
+
+    const handleGeminiMacosResponse = (_event: any, response: { type: string; content: string }) => {
+      console.log('[Chat Panel] MacOS Agent response received:', response);
+      if (chatPanelVisible && chatPanelMode === 'agent') {
+        setIsThinking(false);
+        setCurrentResponse(response.content);
+      }
+    };
+
+    // Handle streaming responses (for Ask mode)
+    const handleStream = (_event: any, data: { type: string; content?: string }) => {
+      if (chatPanelVisible && chatPanelMode === 'ask') {
+        console.log('[Chat Panel] Stream event received for ask mode:', data);
+        
+        if (data.type === 'text' && data.content) {
+          // Accumulate streaming text
+          setIsThinking(false);
+          setCurrentResponse(prev => prev + data.content);
+        } else if (data.type === 'stream_end') {
+          // Stream finished
+          console.log('[Chat Panel] Ask mode stream completed');
+        }
+      }
+    };
+
+    // Also listen for regular responses (for Ask and Select modes)
+    const handleReply = (_event: any, data: { type: string; message: string }) => {
+      // If chat panel is visible, update it for ask or select mode
+      if (chatPanelVisible && (chatPanelMode === 'select' || chatPanelMode === 'ask')) {
+        console.log('[Chat Panel] Response received for', chatPanelMode, ':', data.message);
+        setIsThinking(false);
+        setCurrentResponse(data.message);
+      }
+    };
+
+    window.ipcRenderer.on('ask-response', handleAskResponse);
+    window.ipcRenderer.on('nanobrowser-response', handleNanobrowserResponse);
+    window.ipcRenderer.on('gemini-macos-response', handleGeminiMacosResponse);
+    window.ipcRenderer.on('stream', handleStream);
+    window.ipcRenderer.on('reply', handleReply);
+    
+    return () => {
+      window.ipcRenderer.removeListener('ask-response', handleAskResponse);
+      window.ipcRenderer.removeListener('nanobrowser-response', handleNanobrowserResponse);
+      window.ipcRenderer.removeListener('gemini-macos-response', handleGeminiMacosResponse);
+      window.ipcRenderer.removeListener('stream', handleStream);
+      window.ipcRenderer.removeListener('reply', handleReply);
+    };
+  }, [chatPanelVisible, chatPanelMode]);
+
+  // Word-by-word typing animation for chat panel responses
+  useEffect(() => {
+    if (currentResponse && currentResponse !== displayedResponse) {
+      // Clear any existing typing animation
+      if (typingTimeoutRef.current) {
+        clearTimeout(typingTimeoutRef.current);
+      }
+      
+      setIsTyping(true);
+      setDisplayedResponse('');
+      
+      // Add assistant message to conversation history only if this is a new response
+      if (currentAssistantMessageRef.current !== currentResponse) {
+        const assistantMessageId = `assistant-${Date.now()}`;
+        currentAssistantMessageRef.current = currentResponse;
+        
+        setConversationHistory(prev => [...prev, {
+          role: 'assistant',
+          content: '',
+          id: assistantMessageId
+        }]);
+      }
+      
+      const words = currentResponse.split(' ');
+      let currentWordIndex = 0;
+      
+      const typeNextWord = () => {
+        if (currentWordIndex < words.length) {
+          const currentText = words.slice(0, currentWordIndex + 1).join(' ');
+          setDisplayedResponse(currentText);
+          
+          // Update the last assistant message in conversation history
+          setConversationHistory(prev => {
+            const lastMessage = prev[prev.length - 1];
+            if (lastMessage && lastMessage.role === 'assistant') {
+              return prev.map((msg, index) => 
+                index === prev.length - 1 
+                  ? { ...msg, content: currentText }
+                  : msg
+              );
+            }
+            return prev;
+          });
+          
+          currentWordIndex++;
+          
+          // Delay between words (ChatGPT-like timing)
+          typingTimeoutRef.current = setTimeout(typeNextWord, 100);
+        } else {
+          // Animation complete
+          setIsTyping(false);
+          setDisplayedResponse(currentResponse);
+          
+          // Final update to conversation history
+          setConversationHistory(prev => {
+            const lastMessage = prev[prev.length - 1];
+            if (lastMessage && lastMessage.role === 'assistant') {
+              return prev.map((msg, index) => 
+                index === prev.length - 1 
+                  ? { ...msg, content: currentResponse }
+                  : msg
+              );
+            }
+            return prev;
+          });
+        }
+      };
+      
+      // Start typing animation after a short delay
+      typingTimeoutRef.current = setTimeout(typeNextWord, 200);
+    }
+    
+    return () => {
+      if (typingTimeoutRef.current) {
+        clearTimeout(typingTimeoutRef.current);
+      }
+    };
+  }, [currentResponse, displayedResponse]);
+
+  // Auto-scroll to bottom when new messages are added
+  useEffect(() => {
+    if (chatScrollRef.current) {
+      chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
+    }
+  }, [conversationHistory, isTyping]);
 
   // Remove all the complex hover stuff - just keep it simple
 
@@ -396,9 +617,13 @@ function App() {
         
         // Send message with agent mode and highlight context if available
         if (highlightChatVisible && highlightedImage) {
-          // Send highlight chat with image
+          // Send highlight chat with image and show in new chat panel
           console.log('[App] 🎯 Sending highlight chat message:', prompt);
           console.log('[App] 🎯 Image length:', highlightedImage.length, 'chars');
+          
+          // Show in new chat panel
+          handleSelectMessage(prompt, highlightedImage);
+          
           (window.ipcRenderer.sendMessage as any)(prompt, { 
             mode: agentMode,
             isHighlightChat: true,
@@ -731,74 +956,11 @@ function App() {
     const handleKeyDown = (e: KeyboardEvent) => {
       console.log('[Keyboard] Key pressed:', e.key, 'metaKey:', e.metaKey, 'ctrlKey:', e.ctrlKey, 'chat visible:', isChatPaneVisible, 'highlight visible:', highlightChatVisible);
       
-      // Command+Option: Toggle Agent mode
-      if ((e.metaKey || e.ctrlKey) && e.altKey && !e.key.match(/^[a-zA-Z0-9]$/)) {
-        e.preventDefault();
-        if (agentMode === "agent") {
-          setAgentMode("chat");
-          setIsChatPaneVisible(false);
-        } else {
-          setAgentMode("agent");
-          setIsChatPaneVisible(false);
-          setHighlightChatVisible(false);
-        }
-        return;
-      }
+
       
-      // Command+Delete: Toggle Select (highlight) mode
-      if ((e.metaKey || e.ctrlKey) && (e.key === 'Delete' || e.key === 'Backspace')) {
-        e.preventDefault();
-        if (isHighlightMode || highlightChatVisible) {
-          setIsHighlightMode(false);
-          setHighlightedImage(null);
-          setHighlightChatVisible(false);
-          window.ipcRenderer.send("cancel-screen-highlight");
-        } else {
-          if (!isLiveMode) {
-            setIsHighlightMode(true);
-            window.ipcRenderer.send("start-screen-highlight");
-          }
-        }
-        return;
-      }
+
       
-      // Command+Shift: Toggle Listen mode
-      if ((e.metaKey || e.ctrlKey) && e.shiftKey && !e.key.match(/^[a-zA-Z0-9]$/)) {
-        e.preventDefault();
-        if (isLiveMode) {
-          // Stop listen mode
-          if (audioHandleRef.current) {
-            audioHandleRef.current.stop();
-            audioHandleRef.current = null;
-          }
-          setIsLiveMode(false);
-          localStorage.removeItem('opus-meeting-mode');
-          setMeetingChats([]);
-          setIsChatPaneVisible(false);
-          setMessages([]);
-          setCurrentStream("");
-          window.ipcRenderer.send("stop-conversation-mode");
-        } else {
-          // Start listen mode
-          setIsLiveMode(true);
-          setIsChatPaneVisible(true);
-          localStorage.setItem('opus-meeting-mode', 'true');
-          window.ipcRenderer.send("start-conversation-mode", "live");
-          startAudioStreaming((chunk) => {
-            console.log('[AudioStreaming] Sending chunk to main process, size:', chunk.length);
-            window.ipcRenderer.send("live-audio-chunk", chunk);
-          }).then(({ handle }) => {
-            audioHandleRef.current = handle;
-            console.log('[AudioStreaming] ✅ Audio streaming started successfully');
-          }).catch((error) => {
-            console.error('[AudioStreaming] ❌ Failed to start audio streaming:', error);
-            alert('Failed to start audio capture: ' + error.message);
-            setIsLiveMode(false);
-            localStorage.removeItem('opus-meeting-mode');
-          });
-        }
-        return;
-      }
+
       
       // Command+Enter: Toggle chat open/closed
       if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
@@ -1058,7 +1220,13 @@ function App() {
                 console.log('[Ask Button] Closing Select mode to open Ask mode');
                 setIsHighlightMode(false);
                 setHighlightedImage(null);
+                setSelectImage(null);
                 window.ipcRenderer.send("cancel-screen-highlight");
+              }
+              // Close agent chat panel if switching from agent mode
+              if (agentMode === "agent") {
+                setChatPanelVisible(false);
+                setSelectImage(null);
               }
               
               // If agent mode is active, close it and switch to ask mode
@@ -1070,14 +1238,34 @@ function App() {
                 window.ipcRenderer.send('chat:focus');
                 setTimeout(() => inputRef.current?.focus(), 100);
               } else {
-                // Already in chat mode, toggle ask pane
-                const willOpen = !isChatPaneVisible;
-                setIsChatPaneVisible(willOpen);
-                setHighlightChatVisible(false);
-                if (willOpen) {
-                  // Focus input when opening chat and enable interaction
-                  window.ipcRenderer.send('chat:focus');
-                  setTimeout(() => inputRef.current?.focus(), 100);
+                // Already in chat mode
+                
+                // If chat panel is open, close everything and go to main bar
+                if (chatPanelVisible) {
+                  setChatPanelVisible(false);
+                  setIsChatPaneVisible(false);
+                  setAgentMode("chat");
+                  setSelectImage(null);
+                  setCurrentResponse('');
+                  setDisplayedResponse('');
+                  setIsTyping(false);
+                  setIsThinking(false);
+                  setConversationHistory([]);
+                  currentAssistantMessageRef.current = null;
+                  if (typingTimeoutRef.current) {
+                    clearTimeout(typingTimeoutRef.current);
+                  }
+                } else {
+                  // Chat panel not open, toggle ask pane
+                  const willOpen = !isChatPaneVisible;
+                  setIsChatPaneVisible(willOpen);
+                  setHighlightChatVisible(false);
+                  
+                  if (willOpen) {
+                    // Focus input when opening chat and enable interaction
+                    window.ipcRenderer.send('chat:focus');
+                    setTimeout(() => inputRef.current?.focus(), 100);
+                  }
                 }
               }
             }}
@@ -1158,6 +1346,8 @@ function App() {
                 setAgentMode("agent");
                 setIsChatPaneVisible(false); // Close ask pane
                 setHighlightChatVisible(false); // Close highlight chat if open
+                setChatPanelVisible(false); // Close ask chat panel if open
+                setSelectImage(null); // Clear select image
               }
             }}
             className={`liquid-button inline-flex items-center justify-center gap-1 whitespace-nowrap rounded-md text-xs font-medium transition-all duration-300 ease-in-out h-7 px-2 ${
@@ -1183,6 +1373,10 @@ function App() {
                 setIsHighlightMode(false);
                 setHighlightedImage(null);
                 setHighlightChatVisible(false);
+                setChatPanelVisible(false);
+                setSelectImage(null);
+                setCurrentResponse('');
+                setIsThinking(false);
                 // Send cancel signal to close the highlight overlay
                 window.ipcRenderer.send("cancel-screen-highlight");
               } else {
@@ -1257,54 +1451,71 @@ function App() {
                 setMessages([]);
                 setCurrentStream("");
                 window.ipcRenderer.send("stop-conversation-mode");
+                // Reset double-press timer
+                lastListenPressRef.current = 0;
                 console.log('[Microphone Button] Stop sequence complete');
               } else {
-                // Close other modes when opening Listen mode
-                if (isHighlightMode) {
-                  console.log('[Listen Button] Closing Select mode to open Listen mode');
-                  setIsHighlightMode(false);
-                  setHighlightedImage(null);
-                  window.ipcRenderer.send("cancel-screen-highlight");
+                // Check for double-press
+                const now = Date.now();
+                const timeSinceLastPress = now - lastListenPressRef.current;
+                
+                if (timeSinceLastPress < DOUBLE_PRESS_TIMEOUT) {
+                  // Double press detected - start listen mode
+                  console.log('[Listen Button] Double press detected, starting listen mode');
+                  
+                  // Close other modes when opening Listen mode
+                  if (isHighlightMode) {
+                    console.log('[Listen Button] Closing Select mode to open Listen mode');
+                    setIsHighlightMode(false);
+                    setHighlightedImage(null);
+                    window.ipcRenderer.send("cancel-screen-highlight");
+                  }
+                  if (agentMode === "agent") {
+                    console.log('[Listen Button] Closing Agent mode to open Listen mode');
+                    setAgentMode("chat");
+                    setIsChatPaneVisible(false);
+                  }
+                  if (agentMode === "chat" && isChatPaneVisible) {
+                    console.log('[Listen Button] Closing Ask mode to open Listen mode');
+                    setIsChatPaneVisible(false);
+                  }
+                  
+                  console.log('[Microphone Button] Starting live mode');
+                  setIsLiveMode(true);
+                  setIsChatPaneVisible(true);
+                  // DON'T change agent mode when starting live mode
+                  
+                  // Set meeting mode flag for audio capture
+                  localStorage.setItem('opus-meeting-mode', 'true');
+                  
+                  // Start LiveAudioService in main process
+                  window.ipcRenderer.send("start-conversation-mode", "live");
+                  
+                                   // Start audio streaming in renderer (Clonely-style)
+                   startAudioStreaming((chunk) => {
+                     // Send audio chunks to main process
+                     console.log('[AudioStreaming] Sending chunk to main process, size:', chunk.length);
+                     window.ipcRenderer.send("live-audio-chunk", chunk);
+                                    }).then(({ handle }) => {
+                     audioHandleRef.current = handle;
+                     console.log('[AudioStreaming] ✅ Audio streaming started successfully');
+                   }).catch((error) => {
+                     console.error('[AudioStreaming] ❌ Failed to start audio streaming:', error);
+                     console.error('[AudioStreaming] Error details:', error.message);
+                     console.error('[AudioStreaming] Stack trace:', error.stack);
+                     alert('Failed to start audio capture: ' + error.message);
+                     setIsLiveMode(false); // Revert on failure
+                     localStorage.removeItem('opus-meeting-mode'); // Clear flag on failure
+                   });
+                  
+                  console.log('[Microphone Button] Start sequence initiated');
+                  // Reset timer after successful start
+                  lastListenPressRef.current = 0;
+                } else {
+                  // First press - just record the time
+                  console.log('[Listen Button] First press detected, press again quickly to start listen mode');
+                  lastListenPressRef.current = now;
                 }
-                if (agentMode === "agent") {
-                  console.log('[Listen Button] Closing Agent mode to open Listen mode');
-                  setAgentMode("chat");
-                  setIsChatPaneVisible(false);
-                }
-                if (agentMode === "chat" && isChatPaneVisible) {
-                  console.log('[Listen Button] Closing Ask mode to open Listen mode');
-                  setIsChatPaneVisible(false);
-                }
-                
-                console.log('[Microphone Button] Starting live mode');
-                setIsLiveMode(true);
-                setIsChatPaneVisible(true);
-                // DON'T change agent mode when starting live mode
-                
-                // Set meeting mode flag for audio capture
-                localStorage.setItem('opus-meeting-mode', 'true');
-                
-                // Start LiveAudioService in main process
-                window.ipcRenderer.send("start-conversation-mode", "live");
-                
-                                 // Start audio streaming in renderer (Clonely-style)
-                 startAudioStreaming((chunk) => {
-                   // Send audio chunks to main process
-                   console.log('[AudioStreaming] Sending chunk to main process, size:', chunk.length);
-                   window.ipcRenderer.send("live-audio-chunk", chunk);
-                                  }).then(({ handle }) => {
-                   audioHandleRef.current = handle;
-                   console.log('[AudioStreaming] ✅ Audio streaming started successfully');
-                 }).catch((error) => {
-                   console.error('[AudioStreaming] ❌ Failed to start audio streaming:', error);
-                   console.error('[AudioStreaming] Error details:', error.message);
-                   console.error('[AudioStreaming] Stack trace:', error.stack);
-                   alert('Failed to start audio capture: ' + error.message);
-                   setIsLiveMode(false); // Revert on failure
-                   localStorage.removeItem('opus-meeting-mode'); // Clear flag on failure
-                 });
-                
-                console.log('[Microphone Button] Start sequence initiated');
               }
             }}
             className={`liquid-button liquid-button--mic inline-flex items-center justify-center gap-1 whitespace-nowrap rounded-md text-xs font-medium transition-all h-7 px-2 ${
@@ -1448,6 +1659,11 @@ function App() {
               console.log('[Select Cancel Button] Clicked!');
               setIsHighlightMode(false);
               setHighlightedImage(null);
+              setHighlightChatVisible(false);
+              setChatPanelVisible(false);
+              setSelectImage(null);
+              setCurrentResponse('');
+              setIsThinking(false);
               window.ipcRenderer.send("cancel-screen-highlight");
             }}
             onMouseDown={(e) => {
@@ -1529,13 +1745,9 @@ function App() {
                             <span className="inline-block w-0.5 h-4 bg-white ml-1 animate-pulse"></span>
                           </>
                         ) : (
-                          <div className="flex items-center gap-2 text-white">
-                            <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2"></circle>
-                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                            </svg>
-                            <span>Thinking...</span>
-                          </div>
+                                            <div className="text-white">
+                    <span className="thinking-text">Thinking...</span>
+                  </div>
                         )}
                       </div>
                     )}
@@ -1681,22 +1893,200 @@ function App() {
 
       </div>
 
+      {/* Chat Panel for Ask/Agent modes */}
+      {chatPanelVisible && !isLiveMode && (
+        <div className="fixed top-14 left-1/2 transform -translate-x-1/2 w-[36vw] max-w-[520px] min-w-[420px] h-[45vh] z-30 pointer-events-auto">
+          <div className="liquid-panel rounded-2xl flex flex-col overflow-hidden h-full"
+               style={{
+                 background: 'rgba(0, 0, 0, 0.3)',
+                 backdropFilter: 'blur(20px) saturate(180%) contrast(120%) brightness(110%) hue-rotate(5deg)',
+                 border: '0.5px solid rgba(255, 255, 255, 0.3)',
+               }}>
+            
+            {/* Chat content area */}
+            <div ref={chatScrollRef} className="flex-1 p-4 pb-2 overflow-y-auto">
+              {/* Selected image for select mode - ChatGPT style */}
+              {chatPanelMode === 'select' && selectImage && (
+                <div className="mb-4">
+                  <img 
+                    src={`data:image/png;base64,${selectImage}`}
+                    alt="Selected area"
+                    className="rounded-lg border border-white/20 max-w-[60%] max-h-[120px] object-contain"
+                  />
+                </div>
+              )}
+
+              {/* Conversation History */}
+              {conversationHistory.map((message, index) => (
+                <div 
+                  key={message.id} 
+                  className={`mb-4 ${index === 0 ? 'mt-2' : ''} ${message.role === 'user' ? 'mr-2' : 'ml-3'}`}
+                >
+                  {message.role === 'user' ? (
+                    <div className="flex justify-end">
+                      <div className="bg-white/10 text-white text-sm rounded-lg px-4 py-2 max-w-[70%] break-words">
+                        {message.content}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex justify-start">
+                      <div className="bg-white/5 text-white text-sm rounded-lg px-4 py-2 max-w-[80%] break-words">
+                        {message.content}
+                        {message.id === conversationHistory[conversationHistory.length - 1]?.id && isTyping && (
+                          <span className="inline-block w-0.5 h-4 bg-white/80 ml-1 animate-pulse"></span>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ))}
+              
+              {/* Show thinking state when no messages yet or when thinking */}
+              {isThinking && conversationHistory.length === 1 && (
+                <div className="flex justify-start ml-1 mb-4">
+                  <div className="text-white text-sm">
+                    <span className="thinking-text">Thinking...</span>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Embedded input bar at bottom for all modes */}
+            <div className="border-t border-white/10 p-3 bg-white/[0.03]" 
+                 style={{
+                   background: 'rgba(255, 255, 255, 0.02)',
+                   backdropFilter: 'blur(10px)',
+                 }}
+                 onMouseEnter={() => {
+                   window.ipcRenderer.send('mouse:enter-interactive');
+                 }}
+                 onMouseLeave={() => {
+                   window.ipcRenderer.send('mouse:leave-interactive');
+                 }}>
+              <form onSubmit={(e) => {
+                e.preventDefault();
+                if (prompt.trim() && !isStreaming) {
+                  if (chatPanelMode === 'select' && highlightedImage) {
+                    handleSelectMessage(prompt, highlightedImage);
+                    (window.ipcRenderer.sendMessage as any)(prompt, { 
+                      mode: agentMode,
+                      isHighlightChat: true,
+                      highlightedImage: highlightedImage
+                    });
+                  } else if (chatPanelMode === 'ask') {
+                    handleMessageSent(prompt, 'ask');
+                    (window.ipcRenderer.sendMessage as any)(prompt, { mode: "chat" });
+                  } else if (chatPanelMode === 'agent') {
+                    handleMessageSent(prompt, 'agent');
+                    window.ipcRenderer.send('nanobrowser-command', prompt);
+                  }
+                  setPrompt("");
+                }
+              }} className="relative">
+                <input
+                  value={prompt}
+                  onChange={(e) => setPrompt(e.target.value)}
+                  placeholder={
+                    chatPanelMode === 'select' ? "Ask about the image..." :
+                    chatPanelMode === 'ask' ? "Ask me about your screen..." :
+                    chatPanelMode === 'agent' ? "What do you want to automate..." :
+                    "Type your message..."
+                  }
+                  disabled={isStreaming}
+                  className="w-full px-4 py-2 pr-12 rounded-lg text-white text-sm bg-white/5 border border-white/10 focus:border-white/20 focus:outline-none"
+                  style={{
+                    background: 'rgba(255, 255, 255, 0.05)',
+                    backdropFilter: 'blur(10px)',
+                  }}
+                />
+                <button
+                  type="submit"
+                  disabled={!prompt.trim() || isStreaming}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full flex items-center justify-center transition-opacity"
+                  style={{ 
+                    background: 'rgba(255, 255, 255, 0.1)', 
+                    border: 'none',
+                    opacity: (!prompt.trim() || isStreaming) ? 0.3 : 0.8
+                  }}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="m22 2-7 20-4-9-9-4z"/>
+                    <path d="M22 2 11 13"/>
+                  </svg>
+                </button>
+              </form>
+            </div>
+
+            {/* Close button */}
+            <button
+              onClick={() => {
+                // Complete reset to main bar state
+                setChatPanelVisible(false);
+                setIsChatPaneVisible(false);
+                setAgentMode("chat");
+                setSelectImage(null);
+                setCurrentResponse('');
+                setDisplayedResponse('');
+                setIsTyping(false);
+                setIsThinking(false);
+                setConversationHistory([]);
+                currentAssistantMessageRef.current = null;
+                if (typingTimeoutRef.current) {
+                  clearTimeout(typingTimeoutRef.current);
+                }
+              }}
+              onMouseEnter={() => {
+                window.ipcRenderer.send('mouse:enter-interactive');
+              }}
+              onMouseLeave={() => {
+                window.ipcRenderer.send('mouse:leave-interactive');
+              }}
+              className="absolute top-3 right-3 text-white/60 hover:text-white transition-colors"
+              title="Close chat"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M18 6 6 18"/>
+                <path d="m6 6 12 12"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Input bars - positioned right under main bar */}
       <div className="fixed top-11 left-1/2 transform -translate-x-1/2 z-40">
-        {/* Ask Input Bar - exactly like agent mode */}
-        {agentMode === "chat" && isChatPaneVisible && !isLiveMode && !highlightChatVisible && (
-          <div className="pointer-events-auto" style={{ width: '420px', minWidth: '380px', maxWidth: '440px' }}>
+        {/* Ask Input Bar - only show when chat panel is NOT visible */}
+        {agentMode === "chat" && isChatPaneVisible && !isLiveMode && !highlightChatVisible && !chatPanelVisible && (
+          <div 
+            className="pointer-events-auto" 
+            style={{ width: '420px', minWidth: '380px', maxWidth: '440px' }}
+            onMouseEnter={() => {
+              window.ipcRenderer.send('mouse:enter-interactive');
+            }}
+            onMouseLeave={() => {
+              window.ipcRenderer.send('mouse:leave-interactive');
+            }}
+          >
             <div className="glass-chat-input-area">
-              <AskAgent />
+              <AskAgent onMessageSent={(msg) => handleMessageSent(msg, 'ask')} />
             </div>
           </div>
         )}
 
-        {/* Agent Input Bar - just the input bar */}
-        {agentMode === "agent" && (
-          <div className="pointer-events-auto" style={{ width: '420px', minWidth: '380px', maxWidth: '440px' }}>
+        {/* Agent Input Bar - only show when chat panel is NOT visible */}
+        {agentMode === "agent" && !chatPanelVisible && (
+          <div 
+            className="pointer-events-auto" 
+            style={{ width: '420px', minWidth: '380px', maxWidth: '440px' }}
+            onMouseEnter={() => {
+              window.ipcRenderer.send('mouse:enter-interactive');
+            }}
+            onMouseLeave={() => {
+              window.ipcRenderer.send('mouse:leave-interactive');
+            }}
+          >
             <div className="glass-chat-input-area">
-              {isChromeActive ? <ChromeAgent /> : <MacOSAgent />}
+              {isChromeActive ? <ChromeAgent onMessageSent={(msg) => handleMessageSent(msg, 'agent')} /> : <MacOSAgent onMessageSent={(msg) => handleMessageSent(msg, 'agent')} />}
             </div>
           </div>
         )}

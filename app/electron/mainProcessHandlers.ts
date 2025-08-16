@@ -99,6 +99,7 @@ function appendToHistory(senderId: number, role: ChatRole, content: string): voi
     history.splice(0, history.length - maxMessages);
   }
   chatHistories.set(senderId, history);
+  console.log(`[MainHandlers] 💾 Added to backend history (${role}): ${content.substring(0, 50)}... | Total: ${history.length} messages`);
 }
 
 // Function to dynamically resize window based on content (only grow, never shrink)
@@ -1345,6 +1346,8 @@ Examples:
             try {
               const senderId = event.sender.id;
               const recentHistory = getRecentHistoryString(senderId, 4);
+              console.log('[MainHandlers] 📚 Ask mode context (last 4 messages):');
+              console.log(recentHistory || '(no previous messages)');
               appendToHistory(senderId, 'user', userPrompt);
               const analysisResult = await fastModel.generateContent(analysisPrompt);
               const analysisText = analysisResult.response.text();
@@ -1409,6 +1412,8 @@ ${screenshotBase64 ? 'Analyze what\'s visible on the screen and answer their que
               } else {
                 // Step 2: Always generate a proper conversational response (no screenshot needed)
                 console.log('[MainHandlers] 💬 No screenshot needed, generating conversational response...');
+                console.log('[MainHandlers] 📚 Using context for response:');
+                console.log(recentHistory || '(no previous messages)');
                 
                 const chatPrompt = `You are in Chat mode. Have a natural conversation with the user. Be helpful and friendly. Be concise when appropriate, but provide detailed responses when they would be more helpful.
 
@@ -1799,6 +1804,25 @@ Do NOT describe the screen. Do NOT add anything else. Just use the exact format 
     } catch {}
   });
 
+  // Advanced mouse detection for interactive areas
+  ipcMain.on('mouse:enter-interactive', () => {
+    try {
+      if (win && !win.isDestroyed()) {
+        // Make window interactive when mouse enters interactive areas
+        win.setIgnoreMouseEvents(false);
+      }
+    } catch {}
+  });
+
+  ipcMain.on('mouse:leave-interactive', () => {
+    try {
+      if (win && !win.isDestroyed()) {
+        // Make window click-through when mouse leaves interactive areas
+        win.setIgnoreMouseEvents(true, { forward: true } as any);
+      }
+    } catch {}
+  });
+
   // Browser Agent Mode handlers
   ipcMain.on("start-browser-monitoring", async (_event) => {
     try {
@@ -1933,11 +1957,8 @@ Do NOT describe the screen. Do NOT add anything else. Just use the exact format 
     try {
       console.log('[MainHandlers] NanoBrowser command received:', command);
 
-      // Gently bring Chrome to foreground if needed
-      try {
-        await execPromise(`osascript -e 'tell application "Google Chrome" to activate'`);
-        await new Promise(r => setTimeout(r, 200));
-      } catch {}
+      // Skip Chrome activation - executor will launch its own dedicated Chrome instance
+      console.log('[MainHandlers] Skipping Chrome activation, proceeding with dedicated browser automation...');
 
       // Prefer structured execution via executor
       console.log('[MainHandlers] Importing executor...');
@@ -2016,115 +2037,38 @@ Do NOT describe the screen. Do NOT add anything else. Just use the exact format 
                            lowerInput.length > 50; // Long requests likely need browser automation
       
       if (isComplexTask) {
-        console.log('[MainHandlers] Detected complex browser task, checking Chrome status...');
+        console.log('[MainHandlers] Detected complex browser task, skipping Chrome activation for agent mode...');
         
-        // First check if Chrome is actually visible and in fullscreen
-        let chromeIsVisible = false;
+        // For complex browser tasks, skip Chrome activation and go directly to nanobrowser
+        // Nanobrowser will launch its own dedicated Chrome instance, so we don't need
+        // to check or activate the regular Chrome browser
+        console.log('[MainHandlers] Complex browser task detected - executing nanobrowser automation immediately');
+        
+        event.reply('gemini-macos-response', {
+          type: 'browser_action',
+          content: 'I can help with that! Starting browser automation...'
+        });
+        
+        // Execute the nanobrowser command immediately instead of just storing it
+        console.log('[MainHandlers] Immediately executing nanobrowser command:', userInput);
+        
         try {
-          const result = await execPromise(`osascript -e '
-            tell application "System Events"
-              set chromeVisible to false
-              set chromeFullscreen to false
-              try
-                tell process "Google Chrome"
-                  set chromeVisible to frontmost
-                  if chromeVisible then
-                    try
-                      set windowCount to count of windows
-                      if windowCount > 0 then
-                        tell window 1
-                          set chromeFullscreen to (get value of attribute "AXFullScreen")
-                        end tell
-                      end if
-                    end try
-                  end if
-                end tell
-              end try
-              return (chromeVisible as string) & "," & (chromeFullscreen as string)
-            end tell'`);
-          
-          const [visible, fullscreen] = result.stdout.trim().split(',');
-          chromeIsVisible = visible === 'true' && fullscreen === 'true';
-          console.log('[MainHandlers] Chrome visible and fullscreen:', chromeIsVisible);
-        } catch (checkError) {
-          console.log('[MainHandlers] Chrome status check failed:', checkError);
-        }
-        
-        // If Chrome is not visible and fullscreen, use AppleScript to open/activate it
-        if (!chromeIsVisible) {
-          console.log('[MainHandlers] Chrome not visible/fullscreen, using AppleScript to activate...');
-          
+          // Import and execute nanobrowser command directly
+          const { buildActionPlanFromCommand, executeActionPlan } = await import('./services/chrome/executor.ts');
+          console.log('[MainHandlers] Building action plan for command:', userInput);
+          const plan = buildActionPlanFromCommand(userInput);
+          console.log('[MainHandlers] Action plan:', plan);
+          console.log('[MainHandlers] Executing action plan...');
+          await executeActionPlan(plan, event, 'gemini-macos-response');
+          console.log('[MainHandlers] Action plan completed');
+        } catch (error) {
+          console.error('[MainHandlers] Error executing immediate nanobrowser command:', error);
           event.reply('gemini-macos-response', {
-            type: 'browser_action',
-            content: 'I can help with that! Let me open Chrome in fullscreen and then handle your request...'
+            type: 'conversation',
+            content: `Error starting browser automation: ${error}`
           });
-          
-          try {
-            await new Promise<void>((resolve, reject) => {
-              const timeout = setTimeout(() => reject(new Error('Chrome opening timeout')), 10000);
-              
-              const openChrome = async () => {
-                try {
-                  console.log('[MainHandlers] Opening Chrome and setting fullscreen...');
-                  
-                  // First activate Chrome
-                  await execPromise(`osascript -e 'tell application "Google Chrome" to activate'`);
-                  
-                  // Wait for Chrome to activate
-                  await new Promise(resolve => setTimeout(resolve, 1000));
-                  
-                  // Just activate Chrome (ChromeDevtoolsService will handle fullscreen properly)
-                  try {
-                    await execPromise(`osascript -e '
-                      tell application "Google Chrome"
-                        if (count of windows) is 0 then
-                          make new window
-                        end if
-                        activate
-                      end tell'`);
-                    console.log('[MainHandlers] Chrome activated - ChromeDevtoolsService will handle fullscreen');
-                  } catch (windowError) {
-                    console.log('[MainHandlers] Chrome activation setup failed:', windowError);
-                  }
-                  
-                  // Wait for Chrome to be fully ready
-                  await new Promise(resolve => setTimeout(resolve, 2000));
-                  
-                  console.log('[MainHandlers] Chrome opened and ready');
-                  clearTimeout(timeout);
-                  resolve();
-                } catch (error) {
-                  clearTimeout(timeout);
-                  reject(error);
-                }
-              };
-              
-              openChrome();
-            });
-            
-            // Now store the task for the Chrome agent to pick up
-            process.env.PENDING_AGENT_TASK = userInput;
-            
-          } catch (error) {
-            console.error('[MainHandlers] Error opening Chrome:', error);
-            event.reply('gemini-macos-response', {
-              type: 'conversation',
-              content: 'I had trouble opening Chrome in fullscreen. Please try opening it manually and then ask me again.'
-            });
-          }
-          return;
-        } else {
-          console.log('[MainHandlers] Chrome is already visible and fullscreen, proceeding with browser automation...');
-          // Chrome is already visible and fullscreen, proceed with nanobrowser
-          event.reply('gemini-macos-response', {
-            type: 'browser_action',
-            content: 'I can help with that! Chrome is ready - I\'ll use browser automation to handle your request...'
-          });
-          
-          // Store the task for the Chrome agent
-          process.env.PENDING_AGENT_TASK = userInput;
-          return;
         }
+        return;
       }
       
       // Use Gemini to determine intent and generate response for simple tasks

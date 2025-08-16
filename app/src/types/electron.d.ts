@@ -29,6 +29,10 @@ declare global {
       // Window control
       setIgnoreMouseEvents: (ignore: boolean) => void;
       
+      // Advanced mouse detection
+      mouseEnterInteractive: () => void;
+      mouseLeaveInteractive: () => void;
+      
       // Audio loopback
       enableLoopback: () => Promise<void>;
       disableLoopback: () => Promise<void>;

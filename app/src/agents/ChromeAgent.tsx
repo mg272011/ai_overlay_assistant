@@ -1,10 +1,12 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useState, useEffect, useRef } from 'react';
 
-const ChromeAgent = () => {
+interface ChromeAgentProps {
+  onMessageSent?: (message: string) => void;
+}
+
+const ChromeAgent = ({ onMessageSent }: ChromeAgentProps) => {
   const [inputText, setInputText] = useState('');
-  const [lastResponse, setLastResponse] = useState<string>('');
-  const [isProcessing, setIsProcessing] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   // Check for pending tasks from MacOSAgent or main process
@@ -50,7 +52,10 @@ const ChromeAgent = () => {
     if (!trimmedText) return;
 
     try {
-      setIsProcessing(true);
+      // Notify parent component that a message was sent (to show chat panel)
+      if (onMessageSent) {
+        onMessageSent(trimmedText);
+      }
 
       // Send message to Chrome via IPC
       window.ipcRenderer.send('nanobrowser-command', text);
@@ -58,22 +63,14 @@ const ChromeAgent = () => {
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : String(err);
       console.error('Task error', errorMessage);
-      setIsProcessing(false);
     }
   };
 
-  const handleStopAgent = () => {
-    console.log('Stopping nanobrowser agent...');
-    setIsProcessing(false);
-    setLastResponse('🛑 Agent stopped by user');
-    
-    // Send stop command to main process
-    window.ipcRenderer.send('nanobrowser-stop');
-  };
+
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!inputText.trim() || isProcessing) return;
+    if (!inputText.trim()) return;
     
     const text = inputText;
     setInputText('');
@@ -99,62 +96,18 @@ const ChromeAgent = () => {
     }
   };
 
-  // Listen for nanobrowser responses
-  useEffect(() => {
-    const handleResponse = (_event: any, response: string) => {
-      setLastResponse(response);
-      setIsProcessing(false);
-    };
 
-    window.ipcRenderer.on('nanobrowser-response', handleResponse);
-    
-    return () => {
-      window.ipcRenderer.removeListener('nanobrowser-response', handleResponse);
-    };
-  }, []);
 
   return (
-    <div className="flex flex-col gap-4">
-      {/* Chat Messages Area - similar to Ask UI */}
-      {lastResponse && (
-        <div className="max-h-60 overflow-y-auto mb-4">
-          <div className="space-y-3">
-            <div className="glass-message-bubble glass-message-assistant" style={{
-              background: 'rgba(0, 0, 0, 0.3)',
-              backdropFilter: 'blur(20px) saturate(180%) contrast(120%) brightness(110%) hue-rotate(5deg)',
-              border: '0.5px solid rgba(255, 255, 255, 0.3)',
-              borderRadius: '12px',
-              padding: '12px 16px'
-            }}>
-              <div className="text-white text-sm leading-relaxed whitespace-pre-wrap">
-                {lastResponse}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Input Area - styled like Ask UI */}
-      <div className="glass-chat-input">
-        {isProcessing ? (
-          <div className="flex items-center gap-2 text-white px-4 py-3" style={{
-            background: 'rgba(0, 0, 0, 0.3)',
-            backdropFilter: 'blur(20px) saturate(180%) contrast(120%) brightness(110%) hue-rotate(5deg)',
-            border: '0.5px solid rgba(255, 255, 255, 0.3)',
-            borderRadius: '12px'
-          }}>
-            <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-white"></div>
-            <span className="text-sm">Processing...</span>
-          </div>
-        ) : (
-          <form onSubmit={handleSubmit} className="relative">
+    <div className="w-full">
+      <div className="relative w-full">
+        <form onSubmit={handleSubmit} className="relative">
             <textarea
               ref={inputRef}
               value={inputText}
               onChange={handleInputChange}
               onKeyDown={handleKeyDown}
               placeholder="What do you want to automate"
-              disabled={isProcessing}
               onFocus={() => {
                 window.ipcRenderer.send('chat:focus');
                 if (inputRef.current) {
@@ -175,35 +128,10 @@ const ChromeAgent = () => {
               rows={1}
             />
             
-            {/* Stop Button - shows when processing */}
-            {isProcessing && (
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  e.preventDefault();
-                  handleStopAgent();
-                }}
-                className="absolute right-12 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full flex items-center justify-center transition-opacity pointer-events-auto"
-                style={{ 
-                  background: 'rgba(220, 38, 38, 0.2)', 
-                  border: '1px solid rgba(220, 38, 38, 0.5)',
-                  opacity: 0.9,
-                  pointerEvents: 'auto',
-                  zIndex: 10
-                }}
-                title="Stop Agent"
-              >
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2">
-                  <rect x="6" y="6" width="12" height="12" fill="#ef4444"/>
-                </svg>
-              </button>
-            )}
-            
             {/* Submit Button */}
             <button
               type="submit"
-              disabled={!inputText.trim() || isProcessing}
+              disabled={!inputText.trim()}
               onClick={(e) => {
                 e.stopPropagation();
                 e.preventDefault();
@@ -213,7 +141,7 @@ const ChromeAgent = () => {
               style={{ 
                 background: 'rgba(255, 255, 255, 0.1)', 
                 border: 'none',
-                opacity: (!inputText.trim() || isProcessing) ? 0.3 : 0.8,
+                opacity: !inputText.trim() ? 0.3 : 0.8,
                 pointerEvents: 'auto',
                 zIndex: 10
               }}
@@ -224,10 +152,9 @@ const ChromeAgent = () => {
               </svg>
             </button>
           </form>
-        )}
+        </div>
       </div>
-    </div>
-  );
+    );
 };
 
 export default ChromeAgent; 

@@ -1,5 +1,26 @@
 @import "tailwindcss";
 
+/* Remove ALL focus outlines globally - no more yellow/orange outlines! */
+*:focus {
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+*:focus-visible {
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+button:focus,
+input:focus,
+textarea:focus,
+select:focus,
+a:focus,
+[tabindex]:focus {
+  outline: none !important;
+  box-shadow: none !important;
+}
+
 @theme {
   --color-bg: rgb(16, 15, 15);
   --color-bg-2: rgb(28, 27, 26);
@@ -407,16 +428,17 @@ button, input, form, textarea, [onclick] {
   box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
 }
 
+/* Remove all focus-visible styles that cause yellow/orange outlines */
 .focus-visible\:border-ring:focus-visible {
-  border-color: var(--ring);
+  border-color: transparent !important;
 }
 
 .focus-visible\:ring-ring\/50:focus-visible {
-  box-shadow: 0 0 0 3px rgba(hsl(0 0% 3.9%), 0.5);
+  box-shadow: none !important;
 }
 
 .focus-visible\:ring-\[3px\]:focus-visible {
-  box-shadow: 0 0 0 3px currentColor;
+  box-shadow: none !important;
 }
 
 /* --- Liquid Glass Theme: panels, buttons, and animations --- */
@@ -475,6 +497,16 @@ button, input, form, textarea, [onclick] {
   cursor: pointer !important;
   -webkit-app-region: no-drag !important;
   app-region: no-drag !important;
+  /* Remove all focus outlines */
+  outline: none !important;
+}
+
+/* Remove focus outlines from liquid buttons */
+.liquid-button:focus,
+.liquid-button:focus-visible {
+  outline: none !important;
+  box-shadow: none !important;
+  border: none !important;
 }
 .liquid-button:hover { opacity: 0.95; }
 .liquid-button:active { box-shadow: none; }
@@ -718,23 +750,85 @@ button, input, form, textarea, [onclick] {
 @keyframes glare {
   0% {
     background-position: -200% center;
+    opacity: 0.3;
+  }
+  50% {
+    opacity: 0.8;
   }
   100% {
     background-position: 200% center;
+    opacity: 0.3;
   }
 }
 
+@keyframes thinkingPulse {
+  0%, 100% {
+    opacity: 0.4;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.8;
+    transform: scale(1.02);
+  }
+}
+
+/* Apply glare directly to text elements */
+.thinking-text {
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.6) 0%,
+    rgba(255, 255, 255, 0.8) 20%,
+    rgba(255, 255, 255, 1) 40%,
+    rgba(255, 255, 255, 1) 50%,
+    rgba(255, 255, 255, 1) 60%,
+    rgba(255, 255, 255, 0.8) 80%,
+    rgba(255, 255, 255, 0.6) 100%
+  );
+  background-size: 200% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: glare 2s ease-in-out infinite;
+  display: inline-block;
+}
+
+/* Keep the old class for backward compatibility */
 .thinking-glare {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 12px;
+  border-radius: 8px;
   background: linear-gradient(
     90deg,
     transparent 0%,
-    rgba(255, 255, 255, 0.1) 45%,
-    rgba(255, 255, 255, 0.3) 50%,
-    rgba(255, 255, 255, 0.1) 55%,
+    rgba(255, 255, 255, 0.05) 25%,
+    rgba(255, 255, 255, 0.15) 40%,
+    rgba(255, 255, 255, 0.25) 50%,
+    rgba(255, 255, 255, 0.15) 60%,
+    rgba(255, 255, 255, 0.05) 75%,
     transparent 100%
   );
   background-size: 200% 100%;
-  animation: glare 1.5s ease-in-out infinite;
+  animation: glare 2s ease-in-out infinite, thinkingPulse 1.5s ease-in-out infinite;
+  
+  /* Add a subtle glow */
+  box-shadow: 0 0 20px rgba(255, 255, 255, 0.1);
+}
+
+.thinking-glare::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(
+    135deg,
+    rgba(255, 255, 255, 0.1) 0%,
+    rgba(255, 255, 255, 0.05) 50%,
+    rgba(255, 255, 255, 0.15) 100%
+  );
+  animation: thinkingPulse 1.2s ease-in-out infinite reverse;
 }
 
 /* Window open/close animations */
