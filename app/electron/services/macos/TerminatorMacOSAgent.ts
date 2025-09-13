@@ -1271,16 +1271,15 @@ ${detailedMemory}${lastActionInfo}
 📍 STEP NUMBER: ${this.stepCount}/30
 
 📋 AVAILABLE CLICKABLE ELEMENTS (Choose from these exact options):
-${elements.map((el, idx) => 
-  `[${idx}] "${el.name || 'Unnamed'}" (${el.role || 'unknown'})${el.bounds ? ` at (${el.bounds.x}, ${el.bounds.y})` : ''}`
-).join('\n')}
+${this.buildOrganizedElementList(elements)}
 
 🎯 MANDATORY ELEMENT-ONLY RULE:
 - FORBIDDEN: Using coordinates when ANY elements are listed above - this is completely banned
-- REQUIRED: Always use "text" field with exact element name from the list, even if it's "Unnamed" or generic
-- For web: return CONCRETE selector: {"type":"click","selector":"[data-testid=\"tweetButton\"]","intent":"Submit post"}  
-- For desktop: use element text: {"type":"click","text":"Send","intent":"Submit message"}
-- Example: If you see [3] "Unnamed" → use {"type":"click","text":"Unnamed"} NOT coordinates
+- REQUIRED: Always use BOTH "text" field with exact element name AND "selector" field with exact ID/selector from the list
+- For web: return CONCRETE selector: {"type":"click","text":"Tweet button","selector":"[data-testid=\"tweetButton\"]","intent":"Submit post"}  
+- For desktop: use element text AND selector: {"type":"click","text":"Send","selector":"swift:id:123","intent":"Submit message"}
+- Example: If you see [3] "Unnamed" (swift:id:456) → use {"type":"click","text":"Unnamed","selector":"swift:id:456"} NOT coordinates
+- NO GENERIC NAMES: Don't use "Post" or "Button" - use the EXACT name and selector from the scanned element list
 
 ${elementContext}
 
@@ -1359,6 +1358,7 @@ ${elementContext}
 9. X.COM (TWITTER):
    - **MANDATORY X.COM RULE**: ALWAYS click "New tweet"/"Post" button BEFORE typing - NEVER type into "What's happening?" or "Post text" areas without clicking button first
    - **CRITICAL**: Click "New tweet"/"Post" button FIRST - NEVER click "What's happening?" text area directly
+   - **BUTTON DISTINCTION**: "New tweet" button opens compose area, "Post" button (after typing) publishes the tweet - these are DIFFERENT buttons
    - Posting: 1) Click "Post"/"New tweet" button (bottom left), 2) Type in compose area, 3) Click "Post"
    - Liking: Look for "Like", "Heart", "♥" elements
    - Scrolling: Ensure on homepage/feed first
@@ -1494,7 +1494,8 @@ RESPOND WITH JSON ONLY:
 {
   "type": "click|double_click|right_click|middle_click|hover|drag_and_drop|scroll|scroll_at|type|key|applescript|wait|done|spotlight_open_app|navigate_to_url|search",
   "intent": "Clear description of what this action accomplishes and why it's needed now",
-  "text": "Text to click on or type (for click/type) OR search query (for search - USE THIS INSTEAD OF TYPE+ENTER!)",
+  "text": "EXACT element name from the scanned list (for click actions) OR text to type (for type actions) OR search query (for search)",
+  "selector": "EXACT selector/ID from the element list (e.g., 'swift:id:123', '[data-testid=\"tweetButton\"]', 'applescript:button:Send') - REQUIRED for all click actions",
   "keyString": "e.g., cmd+a, cmd+b, return",
   "applescriptCode": "Full AppleScript if opening app or complex action",
   "appName": "App name for spotlight_open_app (e.g., 'Google Chrome', 'Mail')",
@@ -1515,10 +1516,12 @@ RESPOND WITH JSON ONLY:
 }
 
 📍 STRICT ELEMENT-ONLY POLICY:
-- MANDATORY: Use element names from scan - coordinates are FORBIDDEN when elements exist
-- BE CONSISTENT: If your reasoning mentions a specific element name, use that name in the action
-- For text areas/inputs: Use the specific element name if provided in scan (e.g., "textfield@id:60")
-- ZERO TOLERANCE: Never use coordinates when elements are available, even if names are generic like "Unnamed"`;
+- MANDATORY: Use EXACT element names AND selectors from scan - coordinates are FORBIDDEN when elements exist
+- REQUIRED: Always provide both "text" (element name) AND "selector" (exact ID/selector) for click actions
+- BE CONSISTENT: If your reasoning mentions a specific element name, use that exact name and its selector
+- For text areas/inputs: Use the specific element name AND selector if provided in scan (e.g., text: "textfield@id:60", selector: "swift:id:60")
+- ZERO TOLERANCE: Never use coordinates when elements are available, even if names are generic like "Unnamed"
+- NO GUESSING: Don't say generic names like "Post" - use the EXACT element name and selector from the scanned list`;
 
     try {
               // Use Groq Llama-4-Maverick as primary model
@@ -1733,6 +1736,107 @@ RESPOND WITH JSON ONLY:
       console.error('[TerminatorAgent] Intelligent planning failed:', error);
       // Fallback to simpler planning
     return await this.planStandardAction(task, elements);
+    }
+  }
+
+  private buildOrganizedElementList(elements: TerminatorElement[]): string {
+    try {
+      const indexed = elements.map((el, idx) => ({ el, idx }));
+      const toLower = (s?: string) => (s || '').toLowerCase();
+      const getRole = (e: TerminatorElement) => toLower(e.role);
+      const isClickable = (e: TerminatorElement) => e.clickable !== false;
+
+      type BucketMap = { [key: string]: Array<{ el: TerminatorElement; idx: number }>; };
+      const clickableBuckets: BucketMap = {
+        'Buttons': [],
+        'Inputs/Textareas': [],
+        'Links': [],
+        'Selects/Comboboxes': [],
+        'Checkboxes/Radios': [],
+        'Menus/Options': [],
+        'Media/Images': [],
+        'Other Clickable': []
+      };
+      const infoBuckets: BucketMap = { 'Informational': [] };
+
+      function categorize(e: TerminatorElement): string {
+        const r = getRole(e);
+        if (r.includes('button')) return 'Buttons';
+        if (r.includes('textfield') || r.includes('textarea') || r.includes('text field')) return 'Inputs/Textareas';
+        if (r.includes('link')) return 'Links';
+        if (r.includes('checkbox') || r.includes('radio')) return 'Checkboxes/Radios';
+        if (r.includes('menu') || r.includes('menuitem') || r.includes('option') || r.includes('list')) return 'Menus/Options';
+        if (r.includes('combo') || r.includes('select') || r.includes('popup')) return 'Selects/Comboboxes';
+        if (r.includes('image') || r.includes('img')) return 'Media/Images';
+        return 'Other Clickable';
+      }
+
+      for (const it of indexed) {
+        if (isClickable(it.el)) {
+          clickableBuckets[categorize(it.el)].push(it);
+        } else {
+          infoBuckets['Informational'].push(it);
+        }
+      }
+
+      const byPositionThenName = (a: { el: TerminatorElement; idx: number }, b: { el: TerminatorElement; idx: number }) => {
+        const ab = a.el.bounds, bb = b.el.bounds;
+        if (ab && bb) {
+          if (ab.y !== bb.y) return ab.y - bb.y;
+          if (ab.x !== bb.x) return ab.x - bb.x;
+        }
+        const an = (a.el.name || '').toLowerCase();
+        const bn = (b.el.name || '').toLowerCase();
+        if (an !== bn) return an < bn ? -1 : 1;
+        return a.idx - b.idx;
+      };
+
+      const sections: string[] = [];
+      sections.push('📋 AVAILABLE ELEMENTS (grouped) - Use EXACT element name and selector from this list:');
+      sections.push('');
+
+      // Clickable groups first
+      const clickableOrder = ['Buttons', 'Inputs/Textareas', 'Links', 'Selects/Comboboxes', 'Checkboxes/Radios', 'Menus/Options', 'Media/Images', 'Other Clickable'];
+      for (const key of clickableOrder) {
+        const arr = clickableBuckets[key];
+        if (!arr || arr.length === 0) continue;
+        arr.sort(byPositionThenName);
+        sections.push(`✅ ${key} (${arr.length}):`);
+        for (const { el, idx } of arr) {
+          const bounds = el.bounds ? ` at (${el.bounds.x}, ${el.bounds.y}) size(${el.bounds.width}x${el.bounds.height})` : '';
+          const role = el.role || 'unknown';
+          const name = el.name || 'Unnamed';
+          const selector = el.selector ? ` selector:"${el.selector}"` : '';
+          const webSel = el.webSelector ? ` web:"${el.webSelector}"` : '';
+          sections.push(`  [${idx}] "${name}" (${role})${selector}${webSel}${bounds}`);
+        }
+        sections.push('');
+      }
+
+      // Informational last
+      const infoArr = infoBuckets['Informational'];
+      if (infoArr && infoArr.length > 0) {
+        infoArr.sort(byPositionThenName);
+        sections.push(`ℹ️ Informational (${infoArr.length}):`);
+        for (const { el, idx } of infoArr) {
+          const bounds = el.bounds ? ` at (${el.bounds.x}, ${el.bounds.y}) size(${el.bounds.width}x${el.bounds.height})` : '';
+          const role = el.role || 'unknown';
+          const name = el.name || 'Unnamed';
+          const selector = el.selector ? ` selector:"${el.selector}"` : '';
+          const webSel = el.webSelector ? ` web:"${el.webSelector}"` : '';
+          sections.push(`  [${idx}] "${name}" (${role})${selector}${webSel}${bounds}`);
+        }
+        sections.push('');
+      }
+
+      return sections.join('\n');
+    } catch (e) {
+      try {
+        // Fallback to simple list if anything goes wrong
+        return elements.map((el, idx) => `  [${idx}] "${el.name || 'Unnamed'}" (${el.role || 'unknown'})${el.selector ? ` selector:"${el.selector}"` : ''}${el.bounds ? ` at (${el.bounds.x}, ${el.bounds.y})` : ''}`).join('\n');
+      } catch {
+        return '';
+      }
     }
   }
 
@@ -2817,36 +2921,7 @@ Respond JSON only:
               } catch (browserError) {
                 console.log(`[TerminatorAgent] Browser coordinate click failed:`, browserError);
                 try {
-                  // Fallback: Map predicted global coords to viewport → AXWebArea → screen
-                  const metricsJs = `(function(){
-                    try {
-                      const vv = window.visualViewport;
-                      return JSON.stringify({
-                        ok: true,
-                        dpr: window.devicePixelRatio || 1,
-                        scale: vv?.scale ?? 1,
-                        pageX: vv?.pageLeft ?? window.scrollX,
-                        pageY: vv?.pageTop ?? window.scrollY,
-                        vw: vv?.width ?? window.innerWidth,
-                        vh: vv?.height ?? window.innerHeight
-                      });
-                    } catch(e){ return JSON.stringify({ ok:false, error: String(e) }); }
-                  })()`;
-                  const metricsScript = `
-                    tell application "Google Chrome"
-                      tell active tab of front window
-                        execute javascript "${metricsJs.replace(/"/g, '\\"')}"
-                      end tell
-                    end tell
-                  `;
-                  const metricsRaw = await this.executeAppleScript(metricsScript);
-                  let pageX = 0, pageY = 0;
-                  try {
-                    let t = String(metricsRaw ?? '').trim();
-                    if (t.startsWith('"') && t.endsWith('"')) { try { t = JSON.parse(t); } catch {} }
-                    const m = JSON.parse(t);
-                    if (m && m.ok) { pageX = Math.round(m.pageX || 0); pageY = Math.round(m.pageY || 0); }
-                  } catch {}
+                  // Fallback: Map predicted global coords via AXWebArea → screen (no Node window usage)
 
                   // Get AXWebArea frame from Swift
                   const { execPromise } = await import('../../utils/utils');
@@ -2859,14 +2934,38 @@ Respond JSON only:
                     fy = Number(fr.y) || 0;
                   } catch {}
 
-                  // Convert predicted global → viewport point by subtracting window origin (pageX/pageY accounts for scroll)
-                  const viewportX = Math.max(0, action.x - (Math.round((window as any)?.screenX || 0)) - pageX);
-                  const viewportY = Math.max(0, action.y - (Math.round((window as any)?.screenY || 0)) - pageY);
-                  // Map to screen using AXWebArea origin
-                  const screenX = Math.round(fx + viewportX);
-                  const screenY = Math.round(fy + viewportY);
+                  // Ask page to convert global → client via JS (avoids Node 'window' usage)
+                  const clientJs = `(function(){
+                    try {
+                      const sx = window.screenX || window.screenLeft || 0;
+                      const sy = window.screenY || window.screenTop || 0;
+                      const borderX = Math.max(0, Math.round((window.outerWidth - window.innerWidth) / 2));
+                      const topChrome = Math.max(0, (window.outerHeight - window.innerHeight) - borderX);
+                      const cx = Math.max(0, Math.min(Math.round(${action.x} - sx - borderX), window.innerWidth - 1));
+                      const cy = Math.max(0, Math.min(Math.round(${action.y} - sy - topChrome), window.innerHeight - 1));
+                      return JSON.stringify({ ok:true, cx, cy });
+                    } catch(e){ return JSON.stringify({ ok:false }); }
+                  })()`;
+                  const clientScript = `
+                    tell application "Google Chrome"
+                      tell active tab of front window
+                        execute javascript "${clientJs.replace(/"/g, '\\"')}"
+                      end tell
+                    end tell
+                  `;
+                  let cx = NaN, cy = NaN;
+                  try {
+                    const raw = await this.executeAppleScript(clientScript);
+                    let t = String(raw ?? '').trim();
+                    if (t.startsWith('"') && t.endsWith('"')) { try { t = JSON.parse(t); } catch {} }
+                    const cj = JSON.parse(t);
+                    if (cj && cj.ok) { cx = Number(cj.cx); cy = Number(cj.cy); }
+                  } catch {}
 
-                  // Click via Swift at mapped screen coords
+                  // Map to screen using AXWebArea origin + client coords if available; else fallback to global
+                  const screenX = !Number.isNaN(cx) && !Number.isNaN(cy) ? Math.round(fx + cx) : Math.round(action.x);
+                  const screenY = !Number.isNaN(cx) && !Number.isNaN(cy) ? Math.round(fy + cy) : Math.round(action.y);
+
                   await execPromise(`swift swift/clickAtCoordinates.swift ${screenX} ${screenY}`);
                   ClickPreviewService.showDot(screenX, screenY).catch(() => {});
                   this.updateCursorPosition(screenX, screenY);

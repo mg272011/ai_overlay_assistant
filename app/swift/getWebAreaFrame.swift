@@ -58,34 +58,34 @@ guard CommandLine.arguments.count >= 2 else {
 let bundleId = CommandLine.arguments[1]
 
 guard AXIsProcessTrusted() else {
-  print("{" + "\"error\":\"Accessibility not trusted\"}" )", to: &stderr)
+  print("{" + "\"error\":\"Accessibility not trusted\"}" , to: &stderr)
   exit(2)
 }
 
 guard let app = NSRunningApplication.runningApplications(withBundleIdentifier: bundleId).first else {
-  print("{" + "\"error\":\"App not running\"}" )", to: &stderr)
+  print("{" + "\"error\":\"App not running\"}" , to: &stderr)
   exit(3)
 }
 
 let axApp = AXUIElementCreateApplication(app.processIdentifier)
 var focusedWinRef: CFTypeRef?
 if AXUIElementCopyAttributeValue(axApp, kAXFocusedWindowAttribute as CFString, &focusedWinRef) != .success {
-  print("{" + "\"error\":\"No focused window\"}" )", to: &stderr)
+  print("{" + "\"error\":\"No focused window\"}" , to: &stderr)
   exit(4)
 }
 
 guard let axWin = focusedWinRef as? AXUIElement else {
-  print("{" + "\"error\":\"Focused window not found\"}" )", to: &stderr)
+  print("{" + "\"error\":\"Focused window not found\"}" , to: &stderr)
   exit(5)
 }
 
 guard let webArea = findAXWebArea(in: axWin) else {
-  print("{" + "\"error\":\"AXWebArea not found\"}" )", to: &stderr)
+  print("{" + "\"error\":\"AXWebArea not found\"}" , to: &stderr)
   exit(6)
 }
 
 guard let frame: CGRect = getAttribute(webArea, kAXFrameAttribute as CFString, as: .cgRect) else {
-  print("{" + "\"error\":\"AXFrame not available\"}" )", to: &stderr)
+  print("{" + "\"error\":\"AXFrame not available\"}" , to: &stderr)
   exit(7)
 }
 
