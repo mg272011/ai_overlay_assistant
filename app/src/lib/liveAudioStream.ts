@@ -9,9 +9,10 @@ export interface AudioStreamHandle {
  * The worklet converts Float32 samples to 16-bit little-endian PCM off the main thread.
  */
 export async function startAudioStreaming (
-  onPCMChunk: (chunk: Uint8Array) => void
+  onPCMChunk: (chunk: Uint8Array) => void,
+  progressCallback?: (update: any) => void
 ): Promise<{ handle: AudioStreamHandle; streams: AudioCaptureStreams }> {
-  const streams = await startAudioCapture()
+  const streams = await startAudioCapture(progressCallback)
 
   // We create a separate AudioContext so the caller is not responsible for closing it.
   const ctx = new AudioContext({ sampleRate: 16000 })

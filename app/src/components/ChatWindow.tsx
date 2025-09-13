@@ -102,12 +102,12 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
             return (
               <div
                 key={message.id}
-                className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'} message-enter`}
+                className={`flex ${message.role === 'user' ? 'justify-end mr-5' : 'justify-start'} message-enter`}
               >
                 {message.role === 'user' ? (
                   // User message - top right style
                   <div className="max-w-[70%] text-right">
-                    <div className="inline-block bg-blue-600 text-white px-4 py-2 rounded-2xl rounded-tr-sm">
+                    <div className="inline-block bg-black/20 text-white px-4 py-2 rounded-2xl rounded-tr-sm">
                       <p className="text-sm whitespace-pre-wrap">{displayContent}</p>
                     </div>
                     <div className="text-xs text-white/40 mt-1">You</div>

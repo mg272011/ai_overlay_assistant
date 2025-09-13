@@ -102,27 +102,29 @@ Your task is to analyze the conversation and return a JSON object with the follo
     "description": "1-2 sentence description of what's being discussed"
   },
   "summary": ["Key point 1", "Key point 2", "Key point 3"],
-  "actions": ["Suggestion for what to say/do next"],
-  "questions": ["Specific thing to say next in the meeting"],
+  "actions": [
+    "Search for [specific topic mentioned]",
+    "What's the timeline for implementing this feature?",
+    "I agree with that approach. Should we assign someone to lead this?",
+    "Look up [person/company mentioned]",
+    "Can you clarify the budget constraints?"
+  ],
   "keyPoints": ["Important insight or decision made"]
 }
 
-Guidelines for the "questions" field (MOST IMPORTANT):
-- These should be ACTUAL SENTENCES or questions the user can say right now
-- Must be specific to the current conversation context
-- Should move the discussion forward productively
-- Use natural, conversational language
-- Examples:
-  - "What's the timeline for implementing this feature?"
-  - "I agree with that approach. Should we assign someone to lead this?"
-  - "That makes sense. How will this impact our Q1 goals?"
-  - "Can you clarify the budget constraints for this project?"
+Guidelines for the "actions" field (MOST IMPORTANT):
+- Mix of different action types:
+  1. Things to search/research (start with "Search for", "Look up", "Research")
+  2. Things to say next in the meeting (natural sentences/questions)
+  3. Follow-up items to remember
+- Should be specific to the current conversation context
+- Use natural, conversational language for suggestions
+- Include 4-6 mixed actions total
 
 Other guidelines:
 - Topic header should be specific and meaningful, not generic
-- Actions are suggestions for the user, not clickable items
 - Be concise and focus on substance
-- Include 2-4 questions that would be most helpful right now
+- Do NOT create a separate "questions" field - everything goes in "actions"
 - Return only valid JSON, no additional text`;
 
             const userPrompt = `Please analyze this conversation and provide structured insights:
@@ -163,8 +165,8 @@ ${conversationText}`;
             // Store in history
             this.analysisHistory.push(analysis);
 
-            console.log(`[Glass-Meeting Summary] ✅ ${fullAnalysis ? 'Full analysis' : 'Questions refresh'} complete:`, analysis.topic?.header);
-            console.log('[Glass-Meeting Summary] New questions:', analysis.questions);
+            console.log(`[Glass-Meeting Summary] ✅ ${fullAnalysis ? 'Full analysis' : 'Actions refresh'} complete:`, analysis.topic?.header);
+            console.log('[Glass-Meeting Summary] New actions:', analysis.actions);
 
             // Send to renderer for UI updates
             this.sendToRenderer('analysis-complete', analysis);

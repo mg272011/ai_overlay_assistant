@@ -63,7 +63,7 @@ const SidePanel = () => {
           <div className="space-y-3">
             {messages.map((msg, idx) => (
               <div key={idx} className={`p-3 rounded ${
-                msg.actor === Actors.USER ? 'bg-blue-100' : 'bg-gray-100'
+                msg.actor === Actors.USER ? 'bg-black/20 text-white' : 'bg-gray-100'
               }`}>
                 <div className="text-xs text-white mb-1">{msg.actor}</div>
                 <div>{msg.content}</div>

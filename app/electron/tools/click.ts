@@ -29,6 +29,10 @@ export default async function click(
     );
   }
   try {
+    // Log coordinates if the element has position information
+    if (element && typeof element === 'object' && 'x' in element && 'y' in element) {
+      console.log(`[COORDINATES] 🖱️ Element click at coordinates: (${element.x}, ${element.y}) - element: ${element.id || id}`);
+    }
     await execPromise(`swift swift/click.swift ${bundleId} ${id}`);
     logWithElapsed("performAction", `Executed click for id: ${id}`);
     return { type: "click", id, element: element || null };

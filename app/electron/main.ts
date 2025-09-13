@@ -38,7 +38,7 @@ let win: BrowserWindow | null;
 
 function createWindow() {
   win = new BrowserWindow({
-    icon: path.join(process.env.VITE_PUBLIC, "click.png"),
+    icon: path.join(process.env.VITE_PUBLIC, "logo.png"),
     width: 1400,
     height: 700,
     x: (screen.getPrimaryDisplay().workAreaSize.width - 1400) / 2,
@@ -70,8 +70,7 @@ function createWindow() {
   try {
     win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true } as any);
     win.setAlwaysOnTop(true, 'screen-saver');
-  win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-  win.setFullScreenable(false);
+    win.setFullScreenable(false);
     win.setIgnoreMouseEvents(true, { forward: true } as any);
     // Track initial hidden state (click-through) on the window instance
     (win as any).__opusHidden = true;
@@ -88,7 +87,7 @@ function createWindow() {
     win?.webContents.send("main-process-message", new Date().toLocaleString());
     
     // 🎨 Using CSS-based glass effects (more reliable across different systems)
-    console.log('[Glass] Using CSS backdrop-filter effects for cross-platform compatibility');
+    console.log('[Neatly] Using CSS backdrop-filter effects for cross-platform compatibility');
   });
 
   if (VITE_DEV_SERVER_URL) {
@@ -140,15 +139,15 @@ app.whenReady().then(() => {
   // TODO: prod version
   if (process.platform === "darwin") {
     const icon = nativeImage.createFromPath(
-      path.join(process.env.VITE_PUBLIC, "click.png")
+      path.join(process.env.VITE_PUBLIC, "logo.png")
     );
     app.dock.setIcon(icon);
   }
   if (!fs.existsSync(TMPDIR)) fs.mkdirSync(TMPDIR);
-  new Notification({
-    title: "Hello from Opus",
-    body: "Opus is ready! Type a prompt and run your first task.",
-  }).show();
+    new Notification({
+      title: "Hello from Neatly",
+      body: "Neatly is ready! Type a prompt and run your first task.",
+    }).show();
   createWindow();
 
   // Register global shortcut to toggle Hide (click-through) state
@@ -247,7 +246,27 @@ process.on('exit', () => {
 });
 
 process.on('uncaughtException', (error) => {
-  console.error('[Main] Uncaught exception, force stopping services:', error);
+  console.error('[DEBUG] 🔴🔴🔴 UNCAUGHT EXCEPTION DETECTED 🔴🔴🔴');
+  console.error('[DEBUG] Error:', error);
+  console.error('[DEBUG] Stack:', (error as any)?.stack);
+  
+  // Check if it's a Terminator-related crash
+  const errorString = error?.toString() || '';
+  const stack = (error as any)?.stack || '';
+  
+  if (errorString.includes('terminator') || 
+      stack.includes('terminator') || 
+      stack.includes('TerminatorAgent') ||
+      errorString.includes('button.name') ||
+      errorString.includes('field.name')) {
+    console.log('[DEBUG] 🟡 Terminator-related error detected, attempting to recover...');
+    console.log('[DEBUG] 🟡 NOT EXITING - App should continue running');
+    // Don't exit for Terminator errors - try to recover
+    return;
+  }
+  
+  // For other critical errors, clean up and exit
+  console.error('[DEBUG] 🔴 Critical non-Terminator error, shutting down...');
   try {
     browserDetection.forceStop();
     browserOverlay.forceStop();

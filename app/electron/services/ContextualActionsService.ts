@@ -4,7 +4,7 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 export interface ContextualAction {
   id: string;
   text: string;
-  type: 'search' | 'define' | 'research';
+  type: 'search' | 'define' | 'research' | 'question' | 'suggestion';
   query?: string; // For search/define actions
   confidence: number; // 0-1 confidence score
 }
@@ -63,44 +63,45 @@ export class ContextualActionsService {
   }
 
   public async generateContextualActions(currentText: string, speaker: string): Promise<ContextualResults> {
-    // Throttle requests to avoid too many API calls
+    // Much more aggressive throttling reduction for real-time generation
     const now = Date.now();
-    if (now - this.lastActionTime < 3000) { // Much longer delay - only generate after meaningful conversation
-      console.log('[ContextualActions] Throttled - too soon since last request');
+    if (now - this.lastActionTime < 1000) { // Reduced from 2000 to 1000ms for faster generation
+      console.log('[ContextualActions] ⏰ Throttled - too soon since last request');
       return { searchItems: [], suggestions: [] };
     }
 
-    // IMPORTANT: Only generate actions if we have enough conversation context
-    if (this.recentTurns.length < 3) {
-      console.log('[ContextualActions] Not enough conversation context yet, waiting...');
+    // VERY RELAXED: Allow generation with minimal context
+    if (this.recentTurns.length < 1) { // Reduced from 2 to 1 - generate on first turn
+      console.log('[ContextualActions] ⚠️ Not enough conversation context yet, waiting... (have', this.recentTurns.length, 'turns)');
       return { searchItems: [], suggestions: [] };
     }
 
-    // Skip for very short messages or casual conversation
-    if (currentText.length < 20 || this.isCasualConversation(currentText)) {
-      console.log('[ContextualActions] Skipping casual/short conversation');
+    // VERY RELAXED: Only skip extremely short messages
+    if (currentText.length < 8) { // Reduced from 15 to 8 chars
+      console.log('[ContextualActions] ⚠️ Skipping very short message:', currentText.length, 'chars');
       return { searchItems: [], suggestions: [] };
     }
 
     // Check cache first
     const cacheKey = this.getCacheKey(currentText);
     if (this.actionCache.has(cacheKey)) {
-      console.log('[ContextualActions] Returning cached result for:', cacheKey);
+      console.log('[ContextualActions] 📋 Returning cached result for:', cacheKey);
       return this.actionCache.get(cacheKey) || { searchItems: [], suggestions: [] };
     }
 
     this.lastActionTime = now;
-    console.log('[ContextualActions] Generating actions for:', speaker, '-', currentText.substring(0, 50));
+    console.log('[ContextualActions] 🚀 GENERATING actions for:', speaker, '-', currentText.substring(0, 50));
+    console.log('[ContextualActions] 🚀 Recent turns context:', this.recentTurns.length, 'turns');
+    console.log('[ContextualActions] 🚀 Recent turns:', this.recentTurns.map(t => `${t.speaker}: ${t.text.substring(0, 30)}...`));
 
     try {
       const results = await this.generateActionsWithAI(currentText || '');
       
-      console.log('[ContextualActions] Generated:', results.searchItems.length, 'search items');
+      // Suppress noisy generation logs in production use
+      // console.log('[ContextualActions] ✅ Generated:', results.searchItems.length, 'search items,', results.suggestions.length, 'suggestions');
       
-      // Cache the result ONLY if we got quality results
-      if (results.searchItems.length > 0) {
-        this.actionCache.set(cacheKey, results);
-      }
+      // Cache the result even if empty to avoid re-generating
+      this.actionCache.set(cacheKey, results);
       
       // Clean old cache entries
       if (this.actionCache.size > 50) {
@@ -112,15 +113,9 @@ export class ContextualActionsService {
 
       return results;
     } catch (error) {
-      console.error('[ContextualActions] Error generating actions:', error);
+      console.error('[ContextualActions] ❌ Error generating actions:', error);
       return { searchItems: [], suggestions: [] };
     }
-  }
-
-  private isCasualConversation(text: string): boolean {
-    const casual = ['hi', 'hello', 'hey', 'thanks', 'okay', 'ok', 'yeah', 'yes', 'no', 'bye', 'goodbye', 'see you'];
-    const lower = text.toLowerCase();
-    return casual.some(word => lower.includes(word)) && text.length < 50;
   }
 
   private async generateActionsWithAI(currentText: string): Promise<ContextualResults> {
@@ -129,164 +124,84 @@ export class ContextualActionsService {
       .map(turn => `${turn.speaker}: ${turn.text}`)
       .join('\n');
 
-    const systemPrompt = `You are an expert at generating HIGHLY RELEVANT search suggestions for professional meetings and technical discussions.
+    const systemPrompt = `You are Neatly, an on-device assistant that generates useful, clickable actions for live conversations. Be liberal.
 
-ONLY generate searches that are:
-✅ SPECIFIC technical topics, products, companies, or methodologies mentioned
-✅ Industry standards, frameworks, or best practices discussed  
-✅ Research papers, documentation, or specific tools mentioned
-✅ Business strategies, market analysis, or competitive intelligence needs
-✅ Educational resources for topics being discussed
+Neatly can: run web searches, define terms, suggest follow-ups, analyze screens/recordings, summarize meetings, and help craft replies. Your items should reflect these capabilities without executing them yet.
 
-❌ NEVER generate searches for:
-❌ Common words or generic terms (what is "search", "girl", "man", etc.)
-❌ Personal information about individuals
-❌ Vague "latest on X" queries unless X is a specific product/company
-❌ Questions that don't provide useful professional information
-❌ Generic definitions that everyone would know
+Return 4-5 total items mixing:
+- search: web searches or lookups (people, places, terms)
+- define: brief definition queries
+- research: quick research queries
+- question: clarifying questions the user could ask
+- suggestion: actionable steps the user could do next
 
-EXAMPLES OF GOOD SEARCHES:
-- "React Server Components documentation"
-- "OpenAI API pricing 2024"
-- "Kubernetes deployment best practices"
-- "TypeScript 5.0 new features"
-- "PostgreSQL vs MongoDB performance comparison"
-- "Product management OKR templates"
+Rules:
+- Keep each item's text short and specific.
+- Do not answer now. Items just describe the action/query. The app will run it when clicked.
+- Prefer concrete phrasing: e.g. "Search Japantown restaurants", "Define software engineering", "Ask about project timeline".
+- Include a "query" only for types that require it (search/define/research). For question/suggestion leave query blank.
 
-EXAMPLES OF BAD SEARCHES TO AVOID:
-- "What is search" (too generic)
-- "What is girl" (meaningless)
-- "Latest on conversation" (too vague)
-- "Information about meeting" (useless)
-
-Return JSON with this EXACT structure:
+Return JSON like:
 {
-  "searchItems": [
-    {
-      "text": "Search for [specific technical/professional topic]", 
-      "type": "search",
-      "query": "specific professional search query",
-      "confidence": 0.8
-    }
-  ],
-  "suggestions": []
-}
+  "items": [
+    { "text": "Search Japantown restaurants", "type": "search", "query": "Japantown SF best restaurants", "confidence": 0.7 },
+    { "text": "Ask about project timeline", "type": "question", "confidence": 0.6 },
+    { "text": "Define software engineering", "type": "define", "query": "software engineering definition", "confidence": 0.7 }
+  ]
+}`;
 
-STRICT QUALITY RULES:
-1. Maximum 2 search items - quality over quantity
-2. Only generate if there are genuinely useful technical/professional topics mentioned
-3. Each search must be specific enough to return actionable information
-4. If no good searches can be generated, return empty searchItems array
-5. Confidence must be 0.7 or higher for all items
-6. Every search must provide clear professional value`;
-
-    const userPrompt = `Conversation context:
-${recentContext}
-
-Latest statement: "${currentText}"
-
-Generate ONLY high-quality professional search suggestions for specific topics mentioned. If no specific technical/professional topics were discussed, return empty searchItems array.`;
+    const userPrompt = `Conversation context:\n${recentContext}\n\nLatest statement: "${currentText}"\n\nGenerate 4-5 mixed items that would be most helpful right now.`;
 
     try {
       let response;
-      
-      // Try Gemini first if available
       if (this.gemini) {
         const model = this.gemini.getGenerativeModel({ 
           model: 'gemini-2.5-flash',
-          generationConfig: {
-            temperature: 0.1, // Very low temperature for consistent, focused results
-            maxOutputTokens: 200
-          }
+          generationConfig: { temperature: 0.2, maxOutputTokens: 220 }
         });
-        const result = await model.generateContent({
-          contents: [{
-            role: 'user',
-            parts: [{ text: `${systemPrompt}\n\n${userPrompt}` }]
-          }]
-        });
+        const result = await model.generateContent({ contents: [{ role: 'user', parts: [{ text: `${systemPrompt}\n\n${userPrompt}` }] }] });
         response = result.response?.text()?.trim() || '';
       } else {
-        // Fallback to OpenAI
         const completion = await this.openai.chat.completions.create({
           model: 'gpt-4o-mini',
-          messages: [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: userPrompt }
-          ],
-          max_tokens: 200,
-          temperature: 0.1 // Very low temperature for consistent results
+          messages: [ { role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt } ],
+          max_tokens: 220,
+          temperature: 0.2
         });
         response = completion.choices[0]?.message?.content?.trim() || '';
       }
+      if (!response) return { searchItems: [], suggestions: [] };
 
-      if (!response) {
-        return { searchItems: [], suggestions: [] };
-      }
-
-      // Parse JSON response (handle markdown code block wrappers)
-      let parsedResponse: any;
+      let parsed: any;
       try {
-        // Remove markdown code block wrappers if present
-        let cleanResponse = response;
-        if (response.includes('```json')) {
-          cleanResponse = response.replace(/```json\s*/, '').replace(/```\s*$/, '').trim();
-        } else if (response.includes('```')) {
-          cleanResponse = response.replace(/```\s*/, '').replace(/```\s*$/, '').trim();
-        }
-        
-        parsedResponse = JSON.parse(cleanResponse);
-      } catch (parseError) {
-        console.warn('[ContextualActions] Failed to parse JSON response:', response);
+        let clean = response;
+        if (response.includes('```json')) clean = response.replace(/```json\s*/, '').replace(/```\s*$/, '').trim();
+        else if (response.includes('```')) clean = response.replace(/```\s*/, '').replace(/```\s*$/, '').trim();
+        parsed = JSON.parse(clean);
+      } catch {
         return { searchItems: [], suggestions: [] };
       }
 
-      // Validate and filter search items with STRICT quality criteria
-      const searchItems: ContextualAction[] = (parsedResponse.searchItems || [])
+      const items: ContextualAction[] = (parsed.items || [])
         .filter((item: any) => {
-          // Must have all required fields
-          if (!item.text || !item.type || !item.query) return false;
-          
-          // Must have high confidence
-          if ((item.confidence || 0) < 0.7) return false;
-          
-          // Filter out generic/meaningless searches
-          const badPatterns = [
-            /what is \w{1,6}$/i,  // "what is X" where X is very short
-            /latest on \w{1,8}$/i, // "latest on X" where X is very short
-            /information about/i,
-            /stuff about/i,
-            /everything about/i,
-            /general \w+ knowledge/i
-          ];
-          
-          if (badPatterns.some(pattern => pattern.test(item.text))) {
-            console.log('[ContextualActions] Filtered out generic search:', item.text);
-            return false;
-          }
-          
-          // Filter out single word queries or very generic terms
-          const words = item.query.toLowerCase().split(/\s+/);
-          if (words.length === 1 && words[0].length < 6) {
-            console.log('[ContextualActions] Filtered out single short word:', item.query);
-            return false;
-          }
-          
+          if (!item?.text || !item?.type) return false;
+          const t = String(item.type).toLowerCase();
+          if (!['search','define','research','question','suggestion'].includes(t)) return false;
+          if ((item.confidence || 0) < 0.3) return false;
+          if ((t === 'search' || t === 'define' || t === 'research') && !item.query) return false;
           return true;
         })
-        .slice(0, 2) // Max 2 search items
-        .map((item: any, index: number) => ({
-          id: `search-${Date.now()}-${index}`,
+        .slice(0, 5)
+        .map((item: any, idx: number) => ({
+          id: `ctx-${Date.now()}-${idx}`,
           text: item.text,
-          type: item.type as 'search' | 'define' | 'research',
+          type: item.type as any,
           query: item.query,
-          confidence: Math.min(item.confidence || 0.7, 1.0)
+          confidence: Math.min(item.confidence || 0.5, 1)
         }));
 
-      // NO FALLBACK SEARCHES - if AI didn't generate good ones, return empty
-      console.log('[ContextualActions] Final filtered search items:', searchItems.length);
-      
-      return { searchItems, suggestions: [] };
+      // Put all items into searchItems to use a single rendering list in the UI
+      return { searchItems: items, suggestions: [] };
 
     } catch (error) {
       console.error('[ContextualActions] AI generation error:', error);
@@ -300,6 +215,7 @@ Generate ONLY high-quality professional search suggestions for specific topics m
   }
 
   // REMOVED buildFallbackSearches - no more garbage fallback searches!
+  // REMOVED isCasualConversation - being more aggressive about generating searches
 
   public clearCache(): void {
     this.actionCache.clear();

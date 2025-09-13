@@ -26,7 +26,7 @@ interface LiveSession {
 interface ChatChunk { text?: string; reset?: boolean }
 
 // Meeting-focused system prompt from Clonely
-const GEMINI_SYSTEM_PROMPT = `You are a real-time meeting assistant. Your primary job is to:
+const GEMINI_SYSTEM_PROMPT = `You are Neatly, an on-device real-time meeting assistant. Your primary job is to:
 1. Listen to System Audio (Channel 1) for interview questions or meeting discussions
 2. Suggest exact phrases the user should say in response
 3. Help the user sound confident and knowledgeable in meetings/interviews

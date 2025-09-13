@@ -10,9 +10,10 @@ export type AudioCaptureStreams = {
 /**
  * Starts capturing both microphone and system audio and combines them into a single stream.
  *
+ * @param progressCallback Optional callback to report permission status to UI
  * @returns A promise that resolves to an object containing the combined stream and the original source streams for cleanup.
  */
-export async function startAudioCapture(): Promise<AudioCaptureStreams> {
+export async function startAudioCapture(progressCallback?: (update: any) => void): Promise<AudioCaptureStreams> {
   try {
     console.log('[AudioCapture] Starting audio capture...');
     
@@ -21,7 +22,11 @@ export async function startAudioCapture(): Promise<AudioCaptureStreams> {
     const micOnlyMode = isMeetingMode || localStorage.getItem('opus-mic-only-mode') === 'true';
     
     if (isMeetingMode) {
-      console.log('[AudioCapture] Meeting mode detected - using microphone only (system audio handled by Glass meeting service)');
+      console.log('[AudioCapture] Meeting mode detected - system audio handled by Glass meeting service');
+      progressCallback?.({
+        type: 'info',
+        content: '✅ Meeting mode: Using microphone + Glass system audio service'
+      });
     } else if (micOnlyMode) {
       console.log('[AudioCapture] ⚠️ Running in MICROPHONE-ONLY mode (no system audio)');
     }
@@ -55,7 +60,8 @@ export async function startAudioCapture(): Promise<AudioCaptureStreams> {
         await window.ipcRenderer.enableLoopback();
         console.log('[AudioCapture] ✅ Loopback enabled');
         
-        // Use simple Clonely-style getDisplayMedia call
+        // Try system audio capture directly - don't pre-check permissions as it's unreliable
+        console.log('[AudioCapture] Attempting getDisplayMedia for system audio...');
         systemStream = await navigator.mediaDevices.getDisplayMedia({
           video: true,
           audio: true
@@ -67,22 +73,34 @@ export async function startAudioCapture(): Promise<AudioCaptureStreams> {
         console.error('[AudioCapture] ❌ System audio access failed:', systemError);
         console.error('[AudioCapture] Error details:', systemError);
         
-        // More specific error handling
+        // More specific error handling - but don't be too strict about permission checks
         if (systemError instanceof Error) {
           if (systemError.name === 'NotAllowedError') {
-            throw new Error('Screen Recording permission denied. Please grant permission and restart the app.');
+            console.warn('[AudioCapture] NotAllowedError - this might be a permission issue or macOS quirk');
+            // Don't immediately fail - try to continue with mic-only
+            console.log('[AudioCapture] Attempting to continue with microphone-only mode...');
+            systemStream = micStream.clone();
           } else if (systemError.name === 'NotSupportedError') {
-            throw new Error('Screen recording not supported on this system.');
+            console.warn('[AudioCapture] NotSupportedError - falling back to microphone-only');
+            systemStream = micStream.clone();
+          } else {
+            // For other errors, still try to continue with mic-only
+            console.warn('[AudioCapture] Unknown error, falling back to microphone-only:', systemError.message);
+            systemStream = micStream.clone();
           }
+        } else {
+          // Fallback for non-Error objects
+          console.warn('[AudioCapture] Non-Error exception, falling back to microphone-only');
+          systemStream = micStream.clone();
         }
-        
-        throw new Error('Failed to capture system audio: ' + (systemError instanceof Error ? systemError.message : String(systemError)));
       }
     } else {
       // Create a dummy stream for mic-only mode or meeting mode
       systemStream = micStream.clone();
       if (!isMeetingMode) {
         console.log('[AudioCapture] ⚠️ Skipping system audio capture (mic-only mode)');
+      } else {
+        console.log('[AudioCapture] ⚠️ Meeting mode using microphone-only (system audio handled by Glass service)');
       }
     }
 

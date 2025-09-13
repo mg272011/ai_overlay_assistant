@@ -184,7 +184,7 @@ button, input, form, textarea, [onclick] {
   color: white !important;
   pointer-events: auto !important;
   padding: 6px 10px !important;
-  border-radius: 16px !important;
+  border-radius: 6px !important;
   outline: none !important;
 }
 
@@ -272,7 +272,6 @@ button, input, form, textarea, [onclick] {
 
 .glass-chat-input-area {
   padding: 12px 16px;
-  border-top: 1px solid rgba(255, 255, 255, 0.1);
   background: rgba(255, 255, 255, 0.02);
   position: relative;
   z-index: 2;
@@ -282,7 +281,7 @@ button, input, form, textarea, [onclick] {
 .glass-message {
   margin-bottom: 4px;
   padding: 8px 12px;
-  border-radius: 12px;
+  border-radius: 8px;
   background: linear-gradient(135deg, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0.05) 50%, rgba(255, 255, 255, 0.1) 100%);
   border: 0.5px solid rgba(255, 255, 255, 0.2);
   backdrop-filter: blur(10px) saturate(120%);
@@ -320,7 +319,7 @@ button, input, form, textarea, [onclick] {
   width: 100%;
   background: linear-gradient(135deg, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0.04) 50%, rgba(255, 255, 255, 0.1) 100%);
   border: 0.5px solid rgba(255, 255, 255, 0.25);
-  border-radius: 8px;
+  border-radius: 4px;
   padding: 8px 12px;
   color: #ffffff;
   font-size: 14px;
@@ -331,7 +330,8 @@ button, input, form, textarea, [onclick] {
 }
 
 .glass-input::placeholder {
-  color: white;
+  color: rgba(255, 255, 255, 0.65);
+  font-size: 13px;
 }
 
 .glass-input:focus {
@@ -342,7 +342,7 @@ button, input, form, textarea, [onclick] {
 .glass-button {
   background: rgba(255, 255, 255, 0.1);
   border: 1px solid rgba(255, 255, 255, 0.2);
-  border-radius: 6px;
+  border-radius: 4px;
   color: #ffffff;
   padding: 6px 12px;
   font-size: 12px;
@@ -450,15 +450,15 @@ button, input, form, textarea, [onclick] {
   --glass-highlight: rgba(255, 255, 255, 0.35);
   --glass-shadow: 0 8px 32px rgba(31, 38, 135, 0.15), 0 4px 16px rgba(255, 255, 255, 0.1) inset, inset 0 2px 0 rgba(255, 255, 255, 0.6), inset 0 -2px 0 rgba(255, 255, 255, 0.2), inset 0 0 20px 10px rgba(255, 255, 255, 0.08);
   --glass-blur: 20px;
-  --glass-radius: 24px;
-  --button-radius: 16px;
+  --glass-radius: 16px;
+  --button-radius: 10px;
   --liquid-ease: cubic-bezier(.20,.80,.20,1);
 }
 
 .liquid-panel {
   background: rgba(0, 0, 0, 0.3) !important;
   border: none !important;
-  border-radius: 16px;
+  border-radius: 10px;
   color: white !important;
   pointer-events: auto !important;
   position: relative;
@@ -481,13 +481,17 @@ button, input, form, textarea, [onclick] {
   -webkit-backdrop-filter: saturate(180%) blur(22px);
 }
 
-/* Buttons */
+/* Enhanced button transitions */
 .liquid-button {
   background: transparent;
   border: none;
   border-radius: var(--button-radius);
-  color: white;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1), color 0.18s ease, opacity 0.18s ease;
+  color: #ffffff !important; /* Force pure white text */
+  transition: all 0.25s var(--liquid-ease), 
+              color 0.18s ease, 
+              opacity 0.18s ease,
+              transform 0.25s var(--liquid-ease),
+              box-shadow 0.25s var(--liquid-ease);
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
   box-shadow: none;
@@ -501,17 +505,37 @@ button, input, form, textarea, [onclick] {
   outline: none !important;
 }
 
-/* Remove focus outlines from liquid buttons */
-.liquid-button:focus,
-.liquid-button:focus-visible {
-  outline: none !important;
-  box-shadow: none !important;
-  border: none !important;
+/* Enhanced hover effects */
+.liquid-button:hover { 
+  opacity: 0.95; 
+  transform: translateY(-1px);
+  color: #ffffff !important; /* Maintain white on hover */
 }
-.liquid-button:hover { opacity: 0.95; }
-.liquid-button:active { box-shadow: none; }
-.liquid-button[data-active="true"], .liquid-button.active { background: transparent; border: none; }
-.liquid-button[data-busy="true"], .liquid-button.busy { box-shadow: none; }
+
+.liquid-button:active { 
+  box-shadow: none; 
+  transform: translateY(0px) scale(0.98);
+  color: #ffffff !important; /* Maintain white on active */
+}
+
+/* Mode switching animations for main bar buttons */
+.mainbar-button-active {
+  background: rgba(255, 255, 255, 0.1);
+  transform: scale(1.05);
+  box-shadow: 0 2px 8px rgba(255, 255, 255, 0.1);
+  color: #ffffff !important; /* Pure white for active state */
+}
+
+.mainbar-button-inactive {
+  opacity: 0.9; /* Slightly less opacity but still visible */
+  transform: scale(0.98);
+  color: #ffffff !important; /* Pure white for inactive state */
+}
+
+/* Smooth transitions for mode changes */
+.mode-transition {
+  transition: all 0.3s var(--liquid-ease);
+}
 
 /* Overlay when interacting */
 .liquid-button::after {
@@ -547,10 +571,10 @@ button, input, form, textarea, [onclick] {
 .eq span:nth-child(2) { height:12px; }
 .eq span:nth-child(3) { height:8px; }
 /* animate only in live mode with musical, non-uniform movement */
-.liquid-button--mic[data-live="true"] .eq span { color: rgba(255,85,85,0.95); background: currentColor; }
-.liquid-button--mic[data-live="true"] .eq span:nth-child(1) { animation: eqBar1 .85s var(--liquid-ease) infinite; }
-.liquid-button--mic[data-live="true"] .eq span:nth-child(2) { animation: eqBar2 1s var(--liquid-ease) infinite .08s; }
-.liquid-button--mic[data-live="true"] .eq span:nth-child(3) { animation: eqBar3 .9s var(--liquid-ease) infinite .16s; }
+[data-live="true"] .eq span { color: rgb(239, 68, 68) !important; background: currentColor; }
+[data-live="true"] .eq span:nth-child(1) { animation: eqBar1 .85s var(--liquid-ease) infinite; }
+[data-live="true"] .eq span:nth-child(2) { animation: eqBar2 1s var(--liquid-ease) infinite .08s; }
+[data-live="true"] .eq span:nth-child(3) { animation: eqBar3 .9s var(--liquid-ease) infinite .16s; }
 @keyframes eqBar1 { 0% { transform: scaleY(.4);} 25% { transform: scaleY(1.3);} 55% { transform: scaleY(.6);} 80% { transform: scaleY(1.0);} 100% { transform: scaleY(.7);} }
 @keyframes eqBar2 { 0% { transform: scaleY(.6);} 20% { transform: scaleY(1.2);} 50% { transform: scaleY(.5);} 75% { transform: scaleY(1.1);} 100% { transform: scaleY(.7);} }
 @keyframes eqBar3 { 0% { transform: scaleY(.5);} 30% { transform: scaleY(1.1);} 60% { transform: scaleY(.6);} 85% { transform: scaleY(1.0);} 100% { transform: scaleY(.8);} }
@@ -559,17 +583,36 @@ button, input, form, textarea, [onclick] {
 
 /* Simplified show/hide classes */
 .liquid-animate { 
-  transition: opacity 0.2s ease;
+  transition: opacity 0.28s var(--liquid-ease),
+              max-height 0.38s var(--liquid-ease),
+              width 0.38s var(--liquid-ease),
+              transform 0.38s var(--liquid-ease),
+              filter 0.28s var(--liquid-ease);
+  will-change: opacity, max-height, width, transform, filter;
 }
 .liquid-open { 
   opacity: 1;
   pointer-events: auto;
   visibility: visible;
+  transform: translateY(0) scale(1);
+  filter: blur(0);
 }
 .liquid-closed { 
   opacity: 0;
   pointer-events: none;
   visibility: hidden;
+  transform: translateY(8px) scale(0.98);
+  filter: blur(3px);
+}
+
+/* Smooth chat pane size/width transitions */
+#chat-pane {
+  transition: opacity 0.28s var(--liquid-ease),
+              max-height 0.38s var(--liquid-ease),
+              width 0.38s var(--liquid-ease),
+              transform 0.38s var(--liquid-ease),
+              filter 0.28s var(--liquid-ease);
+  will-change: opacity, max-height, width, transform, filter;
 }
 
 /* 🪄 Enhanced Liquid Glass Effect */
@@ -642,6 +685,7 @@ button, input, form, textarea, [onclick] {
   padding: 6px 10px !important;
   border-radius: 16px !important;
   outline: none !important;
+  font-family: Satoshi, -apple-system, BlinkMacSystemFont, sans-serif !important;
 }
 .glass-input:focus { 
   border: none !important;
@@ -690,8 +734,8 @@ button, input, form, textarea, [onclick] {
   justify-content: center;
   align-items: flex-start;
   width: 100%;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  animation: fadeIn 0.3s ease-out;
+  transition: all 0.42s var(--liquid-ease);
+  animation: fadeIn 0.42s var(--liquid-ease) both;
 }
 
 @keyframes fadeIn {
@@ -951,4 +995,134 @@ input:focus, textarea:focus {
 .liquid-button:hover {
   transform: translateY(-2px);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+/* Smooth mode transition animations */
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-20px);
+    max-height: 0;
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+    max-height: 500px;
+  }
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+    max-height: 500px;
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-20px);
+    max-height: 0;
+  }
+}
+
+@keyframes slideDownSmooth {
+  from {
+    opacity: 0;
+    transform: translateY(-12px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes slideUpSmooth {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-12px) scale(0.98);
+  }
+}
+
+/* Mode transition classes */
+.mode-enter {
+  animation: slideDownSmooth 0.4s var(--liquid-ease) both;
+}
+
+.mode-exit {
+  animation: slideUpSmooth 0.3s var(--liquid-ease) both;
+}
+
+/* Input bar animations */
+.input-bar-enter {
+  animation: slideDownSmooth 0.35s var(--liquid-ease) both;
+}
+
+.input-bar-exit {
+  animation: slideUpSmooth 0.25s var(--liquid-ease) both;
+}
+
+/* Panel animations */
+.panel-enter {
+  animation: slideDown 0.4s var(--liquid-ease) both;
+}
+
+.panel-exit {
+  animation: slideUp 0.3s var(--liquid-ease) both;
+}
+
+/* Chat pane specific animations */
+.chat-pane-enter {
+  animation: slideDown 0.42s var(--liquid-ease) both;
+}
+
+.chat-pane-exit {
+  animation: slideUp 0.32s var(--liquid-ease) both;
+}
+
+/* Meeting mode animations */
+.meeting-enter {
+  animation: slideDown 0.45s var(--liquid-ease) both;
+}
+
+.meeting-exit {
+  animation: slideUp 0.35s var(--liquid-ease) both;
+}
+
+/* Stagger animations for multiple elements */
+.stagger-1 { animation-delay: 0.05s; }
+.stagger-2 { animation-delay: 0.1s; }
+.stagger-3 { animation-delay: 0.15s; }
+
+/* Enhanced liquid animate for smoother transitions */
+.liquid-animate { 
+  transition: opacity 0.28s var(--liquid-ease),
+              max-height 0.42s var(--liquid-ease),
+              width 0.42s var(--liquid-ease),
+              transform 0.42s var(--liquid-ease),
+              filter 0.28s var(--liquid-ease);
+  will-change: opacity, max-height, width, transform, filter;
+}
+
+/* Smooth state transitions */
+.liquid-open { 
+  opacity: 1;
+  pointer-events: auto;
+  visibility: visible;
+  transform: translateY(0) scale(1);
+  filter: blur(0);
+}
+
+.liquid-closed { 
+  opacity: 0;
+  pointer-events: none;
+  visibility: hidden;
+  transform: translateY(8px) scale(0.98);
+  filter: blur(3px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; animation: none !important; }
 }

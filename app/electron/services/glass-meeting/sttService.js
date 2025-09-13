@@ -20,6 +20,9 @@ class GlassSttService {
         this.lastMyTime = 0;
         this.lastTheirText = '';
         this.lastTheirTime = 0;
+        // Defer Me finals to avoid mislabeling when Them overlaps
+        this.pendingMyFinalTimer = null;
+        this.pendingMyFinalText = '';
 
         // Gemini client for ultra-fast correction
         try {
@@ -120,7 +123,14 @@ class GlassSttService {
                 }
 
                 if (isFinal) {
-                    this.callbacks.onTranscriptionComplete?.('Me', transcript);
+                    // Defer 'Me' final briefly; if overlapping 'Them' arrives, suppress
+                    this.pendingMyFinalText = transcript;
+                    if (this.pendingMyFinalTimer) clearTimeout(this.pendingMyFinalTimer);
+                    this.pendingMyFinalTimer = setTimeout(() => {
+                        this.callbacks.onTranscriptionComplete?.('Me', this.pendingMyFinalText);
+                        this.pendingMyFinalText = '';
+                        this.pendingMyFinalTimer = null;
+                    }, 500);
                 }
 
                 this.lastMyText = transcript; this.lastMyTime = now;
@@ -157,6 +167,14 @@ class GlassSttService {
                 }
 
                 if (isFinal) {
+                    // If a pending 'Me' final exists and overlaps strongly, cancel it
+                    const overlapsPendingMe = this.pendingMyFinalText && this.isLikelyDuplicateEcho(transcript, this.pendingMyFinalText);
+                    if (overlapsPendingMe && this.pendingMyFinalTimer) {
+                        clearTimeout(this.pendingMyFinalTimer);
+                        this.pendingMyFinalTimer = null;
+                        this.pendingMyFinalText = '';
+                        console.log('[Glass-Meeting] ✅ Cancelled pending Me final due to Them overlap');
+                    }
                     this.callbacks.onTranscriptionComplete?.('Them', transcript);
                 }
 
@@ -231,7 +249,7 @@ class GlassSttService {
             if (!this.micAudioCounter) this.micAudioCounter = 0;
             this.micAudioCounter++;
             if (this.micAudioCounter % 10 === 0) {
-                console.log('[Glass-Meeting] 🎤 MIC AUDIO chunk #', this.micAudioCounter, '-> MY STT session (should be labeled as "Me")');
+                // Removed cluttering audio chunk log
             }
         } catch (error) {
             console.error('[Glass-Meeting] Error sending mic audio:', error);
@@ -249,7 +267,7 @@ class GlassSttService {
             if (!this.systemAudioCounter) this.systemAudioCounter = 0;
             this.systemAudioCounter++;
             if (this.systemAudioCounter % 10 === 0) {
-                console.log('[Glass-Meeting] 🔊 SYSTEM AUDIO chunk #', this.systemAudioCounter, '-> THEIR STT session (should be labeled as "Them")');
+                // Removed cluttering audio chunk log
             }
         } catch (error) {
             console.error('[Glass-Meeting] Error sending system audio:', error);

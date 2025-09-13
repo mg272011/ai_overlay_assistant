@@ -25,27 +25,41 @@ class GlassListenService {
             onStatusUpdate: (status) => {
                 this.sendToRenderer('update-status', status);
             },
-            onPartial: (speaker, text) => {
-                // Debounced refresh of contextual actions for more responsiveness
-                if (!this._partialTimer) this._partialTimer = null;
-                if (this._partialTimer) clearTimeout(this._partialTimer);
-                this._partialTimer = setTimeout(async () => {
-                    try {
-                        this.contextualActionsService.addConversationTurn(speaker, text);
-                        const results = await this.contextualActionsService.generateContextualActions(text, speaker);
-                        if (results?.searchItems?.length) {
-                            this.sendToRenderer('contextual-search', results.searchItems);
-                        }
-                    } catch {}
-                }, 350);
+            onPartial: (_speaker, _text) => {
+                // Do not generate contextual actions on partials anymore; wait for analysis completion
             }
         });
 
         // Summary service callbacks
         this.summaryService.setCallbacks({
-            onAnalysisComplete: (data) => {
+            onAnalysisComplete: async (data) => {
                 console.log('📊 Glass-Meeting: Analysis completed:', data);
                 this.sendToRenderer('analysis-update', data);
+                // After analysis completes, generate contextual actions for the latest context
+                try {
+                    const last = this.conversationHistory[this.conversationHistory.length - 1];
+                    const lastSpeaker = last?.speaker || 'unknown';
+                    const lastText = last?.text || '';
+                    if (lastText) {
+                        this.contextualActionsService.addConversationTurn(lastSpeaker, lastText);
+                        const results = await this.contextualActionsService.generateContextualActions(lastText, lastSpeaker);
+                        const items = results?.searchItems || [];
+                        // Pick 4: 2 search-like, 2 say-next-like
+                        const searches = items.filter(i => i.type === 'search' || i.type === 'define' || i.type === 'research').slice(0, 2);
+                        const sayNext = items.filter(i => i.type === 'question' || i.type === 'suggestion').slice(0, 2);
+                        
+                        // Emit a single payload under suggestions section per requirement
+                        const composed = [
+                            ...sayNext.map((i, idx) => ({ id: i.id || `say-${idx}`, text: i.text, type: 'say-next', confidence: i.confidence })),
+                            ...searches.map((i, idx) => ({ id: i.id || `search-${idx}`, text: i.text, query: i.query, type: 'search', confidence: i.confidence }))
+                        ];
+                        if (composed.length > 0) {
+                            this.sendToRenderer('contextual-suggestions', composed);
+                        }
+                    }
+                } catch (err) {
+                    console.error('[Glass-Meeting ListenService] ❌ Error generating actions on analysis:', err);
+                }
             },
             onStatusUpdate: (status) => {
                 this.sendToRenderer('update-status', status);

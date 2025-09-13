@@ -42,8 +42,8 @@ export const GlassMeetingView: React.FC<GlassMeetingViewProps> = ({ onActionClic
   
   // Debug state changes and force re-render
   useEffect(() => {
-    console.log('[Glass Meeting View] searchItems state updated:', searchItems);
-    console.log('[Glass Meeting View] searchItems length:', searchItems.length);
+    console.log('[Neatly Meeting View] searchItems state updated:', searchItems);
+    console.log('[Neatly Meeting View] searchItems length:', searchItems.length);
   }, [searchItems]);
   
   useEffect(() => {
@@ -83,7 +83,7 @@ export const GlassMeetingView: React.FC<GlassMeetingViewProps> = ({ onActionClic
     
     // Real-time STT updates (partial and final)
     const handleSTTUpdate = (_: any, data: { speaker: string; text: string; isPartial: boolean; isFinal: boolean; timestamp: number }) => {
-      console.log('[Glass Meeting View] STT update:', data);
+      console.log('[Neatly Meeting View] STT update:', data);
       
       const turn: ConversationTurn = {
         id: `${data.speaker}-${data.timestamp}`,
@@ -305,6 +305,8 @@ export const GlassMeetingView: React.FC<GlassMeetingViewProps> = ({ onActionClic
     window.ipcRenderer.on('live-audio-stopped', handleLiveAudioStopped);
     window.ipcRenderer.on('contextual-search', handleContextualSearch);
     window.ipcRenderer.on('contextual-suggestions', handleContextualSuggestions);
+    window.ipcRenderer.on('meeting-contextual-actions', handleContextualSearch);
+    window.ipcRenderer.on('meeting-contextual-suggestions', handleContextualSuggestions);
 
     return () => {
       window.ipcRenderer.off('stt-update', handleSTTUpdate);
@@ -319,6 +321,8 @@ export const GlassMeetingView: React.FC<GlassMeetingViewProps> = ({ onActionClic
       window.ipcRenderer.off('live-audio-stopped', handleLiveAudioStopped);
       window.ipcRenderer.off('contextual-search', handleContextualSearch);
       window.ipcRenderer.off('contextual-suggestions', handleContextualSuggestions);
+      window.ipcRenderer.off('meeting-contextual-actions', handleContextualSearch);
+      window.ipcRenderer.off('meeting-contextual-suggestions', handleContextualSuggestions);
     };
   }, []);
 
@@ -356,7 +360,7 @@ export const GlassMeetingView: React.FC<GlassMeetingViewProps> = ({ onActionClic
   const displayText = isHovering
     ? viewMode === 'transcript'
       ? 'Copy Transcript'
-      : 'Copy Glass Analysis'
+      : 'Copy Neatly Insights'
     : viewMode === 'insights'
     ? `Live insights`
             : `Listening... ${elapsedTime}`;
@@ -366,10 +370,24 @@ export const GlassMeetingView: React.FC<GlassMeetingViewProps> = ({ onActionClic
       {/* Top Bar - Glass style */}
       <div className="top-bar">
         <div className="bar-left-text">
+          {/* Neatly logo placeholder */}
+          <span style={{ display: 'inline-block', width: 14, height: 14, marginRight: 6, opacity: 0.9 }}>
+            {/* TODO: replace with actual Neatly logo asset */}
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 17l6-10 6 10"/><path d="M12 14v7"/></svg>
+          </span>
           <span className="bar-left-text-content">{displayText}</span>
         </div>
         <div className="bar-controls">
-          <button className="toggle-button" onClick={toggleViewMode}>
+          <button 
+            className="toggle-button" 
+            onClick={toggleViewMode}
+            onMouseEnter={() => {
+              window.ipcRenderer.send('mouse:enter-interactive');
+            }}
+            onMouseLeave={() => {
+              window.ipcRenderer.send('mouse:leave-interactive');
+            }}
+          >
             {viewMode === 'insights' ? (
               <>
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -391,8 +409,14 @@ export const GlassMeetingView: React.FC<GlassMeetingViewProps> = ({ onActionClic
           <button
             className={`copy-button ${copyState === 'copied' ? 'copied' : ''}`}
             onClick={handleCopy}
-            onMouseEnter={() => setIsHovering(true)}
-            onMouseLeave={() => setIsHovering(false)}
+            onMouseEnter={() => {
+              setIsHovering(true);
+              window.ipcRenderer.send('mouse:enter-interactive');
+            }}
+            onMouseLeave={() => {
+              setIsHovering(false);
+              window.ipcRenderer.send('mouse:leave-interactive');
+            }}
           >
             <svg className="copy-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
@@ -438,7 +462,69 @@ export const GlassMeetingView: React.FC<GlassMeetingViewProps> = ({ onActionClic
               </div>
             )}
             
-            {/* Search Items - things mentioned that can be looked up */}
+
+
+            {/* What should I say next - Questions/Suggestions */}
+            {suggestions.length > 0 && (
+              <div className="contextual-actions-container" style={{ 
+                display: 'block', 
+                marginTop: '8px', 
+                visibility: 'visible' as any, 
+                opacity: 1,
+                background: 'rgba(0, 0, 0, 0.3)',
+                backdropFilter: 'blur(20px) saturate(180%) contrast(120%) brightness(110%) hue-rotate(5deg)',
+                border: '0.5px solid rgba(255, 255, 255, 0.3)',
+                borderRadius: '12px',
+                boxShadow: '0 8px 32px rgba(31, 38, 135, 0.15), 0 4px 16px rgba(255, 255, 255, 0.1) inset'
+              }}>
+                <h4 className="contextual-actions-title" style={{ color: '#ffffff' }}>
+                  What should I say next ({suggestions.length} items)
+                </h4>
+                <div className="contextual-actions-list">
+                  {suggestions.map((s, index) => {
+                    const item = typeof s === 'string' ? { id: `s-${index}`, text: s, type: 'say-next' } : (s as any);
+                    const isSearch = item.type === 'search';
+                    const text = item.text || item.query || '';
+                    const icon = isSearch ? '🔍' : '💬';
+                    return (
+                      <div
+                        key={item.id || `suggestion-${index}`}
+                        className={`contextual-action-item ${isSearch ? '' : 'suggestion-item'}`}
+                        style={{ 
+                          cursor: 'pointer', 
+                          display: 'block',
+                          visibility: 'visible' as any,
+                          opacity: 1,
+                          background: 'rgba(255, 255, 255, 0.05)',
+                          padding: '8px 12px',
+                          marginBottom: '4px',
+                          borderRadius: '6px',
+                          color: '#ffffff'
+                        }}
+                        onClick={() => {
+                          if (isSearch) {
+                            const event = new CustomEvent('meeting-action-clicked', {
+                              detail: { type: 'search', text, query: item.query || text },
+                              bubbles: true,
+                              composed: true
+                            });
+                            const listenView = document.querySelector('listen-view');
+                            listenView?.dispatchEvent(event);
+                          } else {
+                            navigator.clipboard.writeText(text);
+                          }
+                        }}
+                        title={isSearch ? `Click to search: ${text}` : 'Click to copy'}
+                      >
+                        <span className="action-text" style={{ color: '#ffffff' }}>{icon} {(text || 'Unknown').replace(/^["']|["']$/g, '')}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Search Actions - things mentioned that can be looked up */}
             {searchItems.length > 0 && (
               <div className="contextual-actions-container" style={{ 
                 display: 'block',
@@ -506,61 +592,18 @@ export const GlassMeetingView: React.FC<GlassMeetingViewProps> = ({ onActionClic
                 </div>
               </div>
             )}
-
-            {/* What should I say next - Questions/Suggestions */}
-            {suggestions.length > 0 && (
-              <div className="contextual-actions-container" style={{ 
-                display: 'block', 
-                marginTop: '8px', 
-                visibility: 'visible' as any, 
-                opacity: 1,
-                background: 'rgba(0, 0, 0, 0.3)',
-                backdropFilter: 'blur(20px) saturate(180%) contrast(120%) brightness(110%) hue-rotate(5deg)',
-                border: '0.5px solid rgba(255, 255, 255, 0.3)',
-                borderRadius: '12px',
-                boxShadow: '0 8px 32px rgba(31, 38, 135, 0.15), 0 4px 16px rgba(255, 255, 255, 0.1) inset'
-              }}>
-                <h4 className="contextual-actions-title" style={{ color: '#ffffff' }}>
-                  What should I say next ({suggestions.length} questions)
-                </h4>
-                <div className="contextual-actions-list">
-                  {suggestions.map((suggestion, index) => {
-                    const text = typeof suggestion === 'string' ? suggestion : (suggestion.text || '');
-                    console.log('[Glass Meeting View] 🟢 RENDERING SUGGESTION:', index, text);
-                    return (
-                      <div
-                        key={suggestion.id || `suggestion-${index}`}
-                        className="contextual-action-item suggestion-item"
-                        style={{ 
-                          cursor: 'pointer', 
-                          display: 'block',
-                          visibility: 'visible' as any,
-                          opacity: 1,
-                          background: 'rgba(255, 255, 255, 0.05)',
-                          padding: '8px 12px',
-                          marginBottom: '4px',
-                          borderRadius: '6px',
-                          color: '#ffffff'
-                        }}
-                        onClick={() => {
-                          navigator.clipboard.writeText(text);
-                          console.log('[Glass Meeting] Suggestion clicked:', text);
-                        }}
-                        title="Click to copy"
-                      >
-                        <span className="action-text" style={{ color: '#ffffff' }}>💬 {(text || 'Unknown').replace(/^["']|["']$/g, '')}</span>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
           </div>
         )}
 
         {/* Insights View */}
         {viewMode === 'insights' && (
-          <div className="insights-container">
+          <div className={`insights-container ${
+            currentAnalysis && (
+              (currentAnalysis.keyPoints?.length || 0) + 
+              (currentAnalysis.actions?.length || 0) + 
+              (currentAnalysis.questions?.length || 0) > 6
+            ) ? 'compact' : ''
+          }`}>
             {currentAnalysis ? (
               <>
                 {/* Topic Header */}
@@ -571,21 +614,21 @@ export const GlassMeetingView: React.FC<GlassMeetingViewProps> = ({ onActionClic
                   </div>
                 )}
 
-                {/* Key Points */}
+                {/* Key Points - limit to 3 items */}
                 {currentAnalysis.keyPoints && currentAnalysis.keyPoints.length > 0 && (
                   <div className="insights-section">
                     <h4>Key Points</h4>
-                    {currentAnalysis.keyPoints.map((point, i) => (
+                    {currentAnalysis.keyPoints.slice(0, 3).map((point, i) => (
                       <div key={i} className="outline-item">{point}</div>
                     ))}
                   </div>
                 )}
 
-                {/* Suggestions */}
+                {/* Suggestions - limit to 2 items */}
                 {currentAnalysis.actions && currentAnalysis.actions.length > 0 && (
                   <div className="insights-section">
                     <h4>Suggestions</h4>
-                    {currentAnalysis.actions.map((action, i) => (
+                    {currentAnalysis.actions.slice(0, 2).map((action, i) => (
                       <div
                         key={i}
                         className="request-item"
@@ -596,11 +639,11 @@ export const GlassMeetingView: React.FC<GlassMeetingViewProps> = ({ onActionClic
                   </div>
                 )}
 
-                {/* Follow-up Questions */}
+                {/* Follow-up Questions - limit to 2 items */}
                 {currentAnalysis.questions && currentAnalysis.questions.length > 0 && (
                   <div className="insights-section">
                     <h4>Questions to Consider</h4>
-                    {currentAnalysis.questions.map((question, i) => (
+                    {currentAnalysis.questions.slice(0, 2).map((question, i) => (
                       <div
                         key={i}
                         className="request-item"
@@ -635,8 +678,8 @@ export const GlassMeetingView: React.FC<GlassMeetingViewProps> = ({ onActionClic
           border-radius: 12px;
           width: 100%;
           height: 100%;
-          min-height: 400px; /* Ensure minimum height */
-          max-height: 600px;
+          min-height: 400px;
+          max-height: 60vh; /* Increased from 45vh to 60vh for more content space */
           box-shadow: none !important;
           border: none;
           pointer-events: none; /* Allow clicking through */
@@ -774,26 +817,35 @@ export const GlassMeetingView: React.FC<GlassMeetingViewProps> = ({ onActionClic
 
         .content-area {
           flex: 1;
-          overflow: hidden;
+          overflow-y: auto; /* Allow vertical scrolling */
+          overflow-x: hidden;
           display: flex;
           flex-direction: column;
           pointer-events: auto; /* Keep content area interactive for scrolling and actions */
           box-shadow: none !important;
           border: none;
+          max-height: calc(100% - 44px); /* Account for top bar height */
+          /* Preserve rounded corners when scrolling */
+          border-radius: 0 0 12px 12px;
         }
 
         .transcription-container,
         .insights-container {
           overflow-y: auto;
-          padding: 12px 12px 16px 12px;
+          overflow-x: hidden;
+          padding: 8px 10px;
           display: flex;
           flex-direction: column;
-          gap: 8px;
-          min-height: 150px;
-          max-height: 600px;
+          gap: 4px;
+          min-height: 120px;
+          max-height: 300px; /* Increased from 250px to 300px for more transcript space */
           position: relative;
           z-index: 1;
-          flex: 1;
+          flex: 0 1 auto; /* Don't take all space */
+          /* Ensure rounded corners are preserved when scrolling */
+          border-radius: 8px;
+          -webkit-mask-image: radial-gradient(white, black);
+          pointer-events: auto;
           box-shadow: none !important;
           border: none;
         }
@@ -895,10 +947,10 @@ export const GlassMeetingView: React.FC<GlassMeetingViewProps> = ({ onActionClic
 
         .insights-container h4 {
           color: #ffffff;
-          font-size: 12px;
+          font-size: 11px;
           font-weight: 600;
-          margin: 12px 0 8px 0;
-          padding: 4px 8px;
+          margin: 8px 0 6px 0;
+          padding: 3px 6px;
           border-radius: 4px;
           background: transparent;
           cursor: default;
@@ -914,15 +966,21 @@ export const GlassMeetingView: React.FC<GlassMeetingViewProps> = ({ onActionClic
 
         .outline-item {
           color: #ffffff;
-          font-size: 11px;
-          line-height: 1.4;
-          margin: 4px 0;
-          padding: 6px 8px;
+          font-size: 10px;
+          line-height: 1.3;
+          margin: 3px 0;
+          padding: 4px 6px;
           border-radius: 4px;
           background: transparent;
           transition: background-color 0.15s ease;
           cursor: pointer;
           word-wrap: break-word;
+          max-height: 40px;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          display: -webkit-box;
+          -webkit-line-clamp: 2;
+          -webkit-box-orient: vertical;
         }
 
         .outline-item:hover {
@@ -1055,6 +1113,22 @@ export const GlassMeetingView: React.FC<GlassMeetingViewProps> = ({ onActionClic
 
         .suggestion-item .action-type {
           background: rgba(52, 199, 89, 0.8);
+        }
+        
+        /* Compact mode for when there's lots of content */
+        .insights-container.compact h4 {
+          font-size: 10px;
+          margin: 5px 0 3px 0;
+          padding: 2px 4px;
+        }
+        
+        .insights-container.compact .outline-item {
+          font-size: 9px;
+          padding: 3px 5px;
+          margin: 2px 0;
+          -webkit-line-clamp: 1;
+          max-height: 20px;
+          line-height: 1.2;
         }
       `}</style>
     </div>

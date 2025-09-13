@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Opus",
+  title: "Neatly",
   description: "On-device computer use agent that runs fully in the background"
 };
 

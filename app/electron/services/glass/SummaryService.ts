@@ -17,8 +17,7 @@ interface AnalysisResult {
     description: string;
   };
   summary: string[];
-  actions: string[];
-  questions: string[];
+  actions: string[];  // This will now include both action items AND suggestions/questions
   keyPoints: string[];
   timestamp: Date;
 }
@@ -31,7 +30,7 @@ export class SummaryService {
   private openaiClient: OpenAI | null = null;
   private analysisTimer: NodeJS.Timeout | null = null;
   private lastAnalysisTime: number = 0;
-  private ANALYSIS_INTERVAL = 30000; // Analyze every 30 seconds
+  private ANALYSIS_INTERVAL = 20000; // Analyze every 30 seconds
   private MIN_TURNS_FOR_ANALYSIS = 3; // Need at least 3 turns for analysis
 
   constructor() {
@@ -120,11 +119,23 @@ Analyze the conversation and provide a structured summary. Format your response 
     "description": "Brief description of what's being discussed"
   },
   "summary": ["Key point 1", "Key point 2", "Key point 3"],
-  "actions": ["Action item 1", "Action item 2"],
-  "questions": ["Follow-up question 1", "Follow-up question 2"],
+  "actions": [
+    "Search for X topic mentioned",
+    "Look up Y person/company",
+    "Consider asking about Z",
+    "Follow up on the timeline discussion",
+    "Research the feature that was mentioned"
+  ],
   "keyPoints": ["Important insight 1", "Important insight 2"]
 }
 
+IMPORTANT: The "actions" array should include a mix of:
+- Search/research items (things to look up)
+- Suggestions for what to say next
+- Follow-up questions to ask
+- Action items to complete
+
+Do NOT create a separate "questions" field. All suggestions and questions go in "actions".
 Keep all points concise and build upon previous analysis if provided.`
         }
       ];
@@ -221,7 +232,7 @@ Be thorough but concise. Include all important information from the entire conve
   }
 
   private buildSystemPrompt(conversation: string): string {
-    return `You are an AI meeting assistant analyzing a live conversation. Your role is to:
+    return `You are Neatly, an on-device AI meeting assistant analyzing a live conversation. Your role is to:
 1. Identify the main topics being discussed
 2. Extract key points and decisions
 3. Identify action items and who is responsible
@@ -231,7 +242,7 @@ Be thorough but concise. Include all important information from the entire conve
 The conversation so far:
 ${conversation}
 
-Provide clear, concise, and actionable insights that help participants stay focused and productive.`;
+Provide clear, concise, and actionable insights that help participants stay focused and productive. Refer to yourself as Neatly only if directly asked who you are.`;
   }
 
   resetConversation() {

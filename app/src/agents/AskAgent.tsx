@@ -1,30 +1,78 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, forwardRef, useImperativeHandle } from 'react';
 
 interface AskAgentProps {
   onMessageSent?: (message: string) => void;
 }
 
-const AskAgent = ({ onMessageSent }: AskAgentProps) => {
+export interface AskAgentHandle {
+  focus: () => void;
+}
+
+const AskAgent = forwardRef<AskAgentHandle, AskAgentProps>(({ onMessageSent }, ref) => {
   const [inputText, setInputText] = useState('');
   const [lastResponse, setLastResponse] = useState<string>('');
   const [isProcessing, setIsProcessing] = useState(false);
+  const [uploadedImages, setUploadedImages] = useState<File[]>([]);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = event.target.files;
+    if (files) {
+      const imageFiles = Array.from(files).filter(file => file.type.startsWith('image/'));
+      setUploadedImages(prev => [...prev, ...imageFiles]);
+    }
+  };
+
+  const removeImage = (index: number) => {
+    setUploadedImages(prev => prev.filter((_, i) => i !== index));
+  };
 
   const handleSendMessage = async (text: string) => {
     const trimmedText = text.trim();
-    if (!trimmedText) return;
+    if (!trimmedText && uploadedImages.length === 0) return;
 
     try {
       setIsProcessing(true);
+      setLastResponse(''); // Clear previous response
 
       // Notify parent component that a message was sent (to show chat panel)
       if (onMessageSent) {
-        onMessageSent(trimmedText);
+        onMessageSent(trimmedText || "Uploaded images");
       }
 
-      // Send message via IPC for screen analysis
-      (window.ipcRenderer.sendMessage as any)(text, { mode: "chat" });
+      // If we have images, send them via IPC
+      if (uploadedImages.length > 0) {
+        const imageData = await Promise.all(
+          uploadedImages.map(async (file) => {
+            return new Promise<{name: string, data: string}>((resolve) => {
+              const reader = new FileReader();
+              reader.onload = (e) => {
+                resolve({
+                  name: file.name,
+                  data: e.target?.result as string
+                });
+              };
+              reader.readAsDataURL(file);
+            });
+          })
+        );
+        
+        // First send images
+        window.ipcRenderer.send('images-uploaded', { images: imageData });
+        
+        // Then send message with images mode
+        (window.ipcRenderer.sendMessage as any)(trimmedText, { 
+          mode: "chat"
+        });
+        
+        // Clear uploaded images after sending
+        setUploadedImages([]);
+      } else {
+        // Send message via IPC for screen analysis
+        (window.ipcRenderer.sendMessage as any)(text, { mode: "chat" });
+      }
 
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : String(err);
@@ -60,6 +108,15 @@ const AskAgent = ({ onMessageSent }: AskAgentProps) => {
     }
   };
 
+  // Expose focus method to parent component
+  useImperativeHandle(ref, () => ({
+    focus: () => {
+      if (inputRef.current) {
+        inputRef.current.focus();
+      }
+    }
+  }));
+
   // Listen for responses
   useEffect(() => {
     const handleResponse = (_event: any, response: string) => {
@@ -67,9 +124,21 @@ const AskAgent = ({ onMessageSent }: AskAgentProps) => {
       setIsProcessing(false);
     };
 
+    const handleStream = (_event: any, data: { type: string; content?: string }) => {
+      if (data.type === 'text' && data.content) {
+        // Accumulate streaming text
+        setLastResponse(prev => prev + data.content);
+      } else if (data.type === 'stream_end') {
+        // Stream finished
+        setIsProcessing(false);
+      }
+    };
+
     window.ipcRenderer.on('ask-response', handleResponse);
+    window.ipcRenderer.on('stream', handleStream);
     return () => {
       window.ipcRenderer.removeListener('ask-response', handleResponse);
+      window.ipcRenderer.removeListener('stream', handleStream);
     };
   }, []);
 
@@ -82,13 +151,34 @@ const AskAgent = ({ onMessageSent }: AskAgentProps) => {
           </div>
         )}
 
+        {/* Image previews */}
+        {uploadedImages.length > 0 && (
+          <div className="mb-3 flex flex-wrap gap-2">
+            {uploadedImages.map((image, index) => (
+              <div key={index} className="relative group">
+                <img
+                  src={URL.createObjectURL(image)}
+                  alt={`Upload ${index + 1}`}
+                  className="w-16 h-16 object-cover rounded-lg border border-white/20"
+                />
+                <button
+                  onClick={() => removeImage(index)}
+                  className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white rounded-full text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
         <form onSubmit={handleSubmit} className="relative">
           <textarea
             ref={inputRef}
             value={inputText}
             onChange={handleInputChange}
             onKeyDown={handleKeyDown}
-            placeholder="Ask me about your screen..."
+            placeholder={uploadedImages.length > 0 ? "Ask about these images..." : "Ask questions about what's visible on your screen"}
             disabled={isProcessing}
             onFocus={() => {
               window.ipcRenderer.send('chat:focus');
@@ -96,7 +186,7 @@ const AskAgent = ({ onMessageSent }: AskAgentProps) => {
                 inputRef.current.style.pointerEvents = 'auto';
               }
             }}
-            className="glass-input w-full resize-none overflow-hidden pr-12"
+            className="glass-input w-full resize-none overflow-hidden pr-24"
             style={{ 
               minHeight: '40px', 
               maxHeight: '120px',
@@ -105,38 +195,79 @@ const AskAgent = ({ onMessageSent }: AskAgentProps) => {
               border: '0.5px solid rgba(255, 255, 255, 0.3)',
               borderRadius: '12px',
               wordWrap: 'break-word',
-              whiteSpace: 'pre-wrap'
+              whiteSpace: 'pre-wrap',
+              display: 'flex',
+              alignItems: 'center'
             }}
             rows={1}
           />
           
-          {/* Submit Button - identical to ChromeAgent */}
+          {/* Hidden file input */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            multiple
+            onChange={handleFileUpload}
+            className="hidden"
+          />
+          
+          {/* Photo upload button */}
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            onMouseEnter={() => {
+              window.ipcRenderer.send('mouse:enter-interactive');
+            }}
+            onMouseLeave={() => {
+              window.ipcRenderer.send('mouse:leave-interactive');
+            }}
+            className="absolute right-16 top-1/2 -translate-y-1/2 p-1 transition-opacity pointer-events-auto"
+            style={{ 
+              background: 'transparent', 
+              border: 'none',
+              opacity: 0.7,
+              pointerEvents: 'auto',
+              zIndex: 10,
+              color: 'white'
+            }}
+            title="Upload photos"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+              <polyline points="7,10 12,15 17,10"/>
+              <line x1="12" y1="15" x2="12" y2="3"/>
+            </svg>
+          </button>
+          
+          {/* Submit Button */}
           <button
             type="submit"
-            disabled={!inputText.trim() || isProcessing}
+            disabled={(!inputText.trim() && uploadedImages.length === 0) || isProcessing}
             onClick={(e) => {
               e.stopPropagation();
               e.preventDefault();
               handleSubmit(e as any);
             }}
-            className="absolute right-3 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full flex items-center justify-center transition-opacity pointer-events-auto"
+            className="absolute right-3 top-1/2 -translate-y-1/2 px-2 py-1 flex items-center justify-center gap-1 transition-opacity pointer-events-auto text-xs"
             style={{ 
-              background: 'rgba(255, 255, 255, 0.1)', 
+              background: 'transparent', 
               border: 'none',
-              opacity: (!inputText.trim() || isProcessing) ? 0.3 : 0.8,
+              opacity: ((!inputText.trim() && uploadedImages.length === 0) || isProcessing) ? 0.3 : 0.8,
               pointerEvents: 'auto',
-              zIndex: 10
+              zIndex: 10,
+              color: 'white'
             }}
           >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="m22 2-7 20-4-9-9-4z"/>
-              <path d="M22 2 11 13"/>
-            </svg>
+            <span>send</span>
+            <span style={{ fontSize: '10px', opacity: 0.7 }}>↵</span>
           </button>
         </form>
       </div>
     </div>
   );
-};
+});
+
+AskAgent.displayName = 'AskAgent';
 
 export default AskAgent; 

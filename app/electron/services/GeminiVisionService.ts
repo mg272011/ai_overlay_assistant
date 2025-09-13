@@ -235,6 +235,66 @@ Be conversational and helpful in your response.`;
       throw error;
     }
   }
+
+  async analyzeImageWithPrompt(imageData: string, userPrompt: string): Promise<string> {
+    console.log('[GeminiVision] Starting analyzeImageWithPrompt...');
+    console.log('[GeminiVision] Prompt length:', userPrompt.length);
+    console.log('[GeminiVision] Image data length:', imageData.length);
+    
+    const imagePart = {
+      inlineData: {
+        data: imageData.replace(/^data:image\/[a-z]+;base64,/, ''),
+        mimeType: "image/png",
+      },
+    };
+
+    console.log('[GeminiVision] Image part prepared, base64 length:', imagePart.inlineData.data.length);
+
+    try {
+      console.log('[GeminiVision] Sending request to Gemini...');
+      const result = await this.geminiPro.generateContent([userPrompt, imagePart]);
+      console.log('[GeminiVision] Gemini response received');
+      
+      const responseText = result.response.text().trim();
+      console.log('[GeminiVision] Response text length:', responseText.length);
+      console.log('[GeminiVision] Response preview:', responseText.substring(0, 100) + '...');
+      
+      return responseText;
+    } catch (error) {
+      console.error(`[GeminiVision] Error analyzing image:`, error);
+      console.error('[GeminiVision] Error details:', error instanceof Error ? error.message : String(error));
+      throw error;
+    }
+  }
+
+  async analyzeImagesWithPrompt(imageDatas: string[], userPrompt: string): Promise<string> {
+    console.log('[GeminiVision] Starting analyzeImagesWithPrompt...', {
+      promptLength: userPrompt.length,
+      numImages: imageDatas?.length || 0
+    });
+
+    const imageParts = (imageDatas || []).map((img, idx) => ({
+      inlineData: {
+        data: (img || '').replace(/^data:image\/[a-zA-Z0-9.+-]+;base64,/, ''),
+        mimeType: "image/png",
+      },
+      // @ts-ignore: keep minimal additional context
+      _index: idx
+    }));
+
+    try {
+      // Compose content parts: prompt then all images
+      const parts: any[] = [userPrompt, ...imageParts];
+      console.log('[GeminiVision] Sending multi-image request to Gemini, images:', imageParts.length);
+      const result = await this.geminiPro.generateContent(parts);
+      const responseText = result.response.text().trim();
+      console.log('[GeminiVision] Multi-image response length:', responseText.length);
+      return responseText;
+    } catch (error) {
+      console.error(`[GeminiVision] Error analyzing images:`, error);
+      throw error;
+    }
+  }
 }
 
 export const geminiVision = new GeminiVisionService(); 

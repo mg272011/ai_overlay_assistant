@@ -1,21 +1,22 @@
 // @ts-ignore
-import { app, BrowserWindow, ipcMain, Notification, screen } from "electron";
-import OpenAI from 'openai';
+import { app, BrowserWindow, ipcMain, Notification, screen, dialog, shell, Menu, desktopCapturer, nativeImage } from "electron";
+// import OpenAI from 'openai'; // Unused
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { getAppName, getBundleId } from "./utils/getAppInfo";
 import { getClickableElements } from "./utils/getClickableElements";
 import { takeAndSaveScreenshots } from "./utils/screenshots";
 import { execPromise, logWithElapsed } from "./utils/utils";
-import { performAction } from "./performAction";
+// import { performAction } from "./performAction"; // Unused
 // Removed unused imports: runAppleScript, key
 import { Element } from "./types";
 import { LiveAudioService } from "./services/LiveAudioService";
-// Removed unused import: geminiVision
-import { initScreenHighlightService, getScreenHighlightService } from "./services/ScreenHighlightService";
+import { geminiVision } from "./services/GeminiVisionService";
+import { initScreenHighlightService } from "./services/ScreenHighlightService";
 import { ContextualActionsService } from "./services/ContextualActionsService";
 import { browserDetection } from "./services/BrowserDetectionService";
 // import { ListenService } from "./services/glass/ListenService"; // Replaced by JavaScript version
+// Services are declared locally where needed
 
 // Mock function to replace agent functionality
 async function* mockAgentStreaming() {
@@ -23,9 +24,10 @@ async function* mockAgentStreaming() {
 }
 
 // OpenAI client for fallback
-let openaiClient: OpenAI | null = null;
+// OpenAI client disabled - not used in current agent system
+// let openaiClient: OpenAI | null = null; // Unused
 try {
-  openaiClient = new OpenAI();
+  // openaiClient = new OpenAI();
 } catch (error) {
   console.log('[MainHandlers] OpenAI client not available for fallback');
 }
@@ -74,13 +76,13 @@ type ChatRole = 'user' | 'assistant';
 interface ChatMessage { role: ChatRole; content: string }
 const chatHistories = new Map<number, ChatMessage[]>();
 
-type PlanStep = {
-  id: number;
-  title: string;
-  action: 'open_app' | 'navigate_url' | 'agent';
-  params?: Record<string, any>;
-  check?: { type: 'app_frontmost' | 'url_contains'; value: string };
-};
+// type PlanStep = { // Unused
+//   id: number;
+//   title: string;
+//   action: 'open_app' | 'navigate_url' | 'agent';
+//   params?: Record<string, any>;
+//   check?: { type: 'app_frontmost' | 'url_contains'; value: string };
+// };
 
 function getRecentHistoryString(senderId: number, limit: number = 4): string {
   const history = chatHistories.get(senderId) || [];
@@ -302,7 +304,7 @@ export function setupMainHandlers({ win }: { win: InstanceType<typeof BrowserWin
   
   // Live audio streaming handler - receives chunks from renderer
   ipcMain.on("live-audio-chunk", async (_, chunk: Uint8Array) => {
-    console.log('[MainHandlers] 🎤 Received live-audio-chunk, size:', chunk.byteLength);
+    // Removed cluttering audio log
     
     try {
       // Convert to base64 and send to Glass JavaScript STT
@@ -310,12 +312,15 @@ export function setupMainHandlers({ win }: { win: InstanceType<typeof BrowserWin
         const buffer = Buffer.from(chunk);
         
         // The audio is interleaved stereo PCM16 at 16kHz
-              // Channel 0 (left) = Microphone (user speaking)
-      // Channel 1 (right) = System audio (other person speaking)
-      
-      // Extract left channel (mic) and right channel (system)
-      const leftChannel = Buffer.alloc(buffer.length / 2);
-      const rightChannel = Buffer.alloc(buffer.length / 2);
+        // Channel 0 (left) = Microphone (user speaking)
+        // Channel 1 (right) = System audio (other person speaking)
+        // 
+        // NOTE: In meeting mode, both channels contain microphone audio since we don't capture system audio
+        // We should only send to the microphone STT to avoid duplicate transcriptions
+        
+        // Extract left channel (mic) and right channel (system)
+        const leftChannel = Buffer.alloc(buffer.length / 2);
+        const rightChannel = Buffer.alloc(buffer.length / 2);
         
         let leftIndex = 0;
         let rightIndex = 0;
@@ -330,15 +335,22 @@ export function setupMainHandlers({ win }: { win: InstanceType<typeof BrowserWin
           rightChannel[rightIndex++] = buffer[i + 3];
         }
         
-        // Send left channel to mic STT (Me)
+        // Always send left channel to mic STT (You/Me)
         const micBase64 = leftChannel.toString('base64');
         await glassJSListenService.sendMicAudioContent(micBase64);
         
-        // Send right channel to system STT (Them)
-        const systemBase64 = rightChannel.toString('base64');
-        await glassJSListenService.sendSystemAudioContent(systemBase64);
+        // Only send right channel to system STT (Them) if we're NOT in meeting mode
+        // In meeting mode, both channels contain microphone audio, so sending to system STT
+        // would create duplicate transcriptions labeled as "Them"
+        const isMeetingMode = true; // We know we're in meeting mode if this handler is called
         
-        console.log('[MainHandlers] 🎤 Sent left channel to Mic STT, right channel to System STT');
+        if (!isMeetingMode) {
+          const systemBase64 = rightChannel.toString('base64');
+          await glassJSListenService.sendSystemAudioContent(systemBase64);
+          console.log('[MainHandlers] 🎤 Sent left channel to Mic STT, right channel to System STT');
+        } else {
+          // Sent left channel to Mic STT
+        }
       }
     } catch (error) {
       console.error('[MainHandlers] Error processing live audio chunk:', error);
@@ -370,8 +382,6 @@ export function setupMainHandlers({ win }: { win: InstanceType<typeof BrowserWin
       if (results.searchItems?.length) {
         console.log('[MainHandlers] Sending contextual-search event with', results.searchItems.length, 'items');
         win?.webContents.send('contextual-search', results.searchItems);
-      } else {
-        console.log('[MainHandlers] No search items to send');
       }
       
       if (results.suggestions?.length) {
@@ -467,16 +477,31 @@ export function setupMainHandlers({ win }: { win: InstanceType<typeof BrowserWin
               }
             });
             
+            // Include document context if available
+            let documentContext = '';
+            if ((global as any).meetingDocuments && (global as any).meetingDocuments.length > 0) {
+              documentContext = '\n\nMEETING CONTEXT DOCUMENTS:\n';
+              (global as any).meetingDocuments.forEach((doc: any) => {
+                if (doc.content && typeof doc.content === 'string') {
+                  // For text documents, include content
+                  if (doc.type.includes('text') || doc.name.endsWith('.txt') || doc.name.endsWith('.md')) {
+                    documentContext += `\n[${doc.name}]:\n${doc.content.substring(0, 1000)}...\n`;
+                  }
+                }
+              });
+            }
+            
             const prompt = `You suggest exactly what someone should say next in a meeting. 
 
 Provide 3-4 sentences that the person can actually say.
 Be specific and directly related to the last few exchanges.
 Use natural conversational language.
 Move the conversation forward productively.
+${documentContext ? 'Use the provided context documents (which could be resumes, agendas, project info, meeting notes, etc.) to give more informed, personalized responses that draw from relevant details.' : ''}
 
 Do NOT say things like "Consider asking..." or "You might want to..." - just provide the actual words to say.
 
-${seed}`;
+${seed}${documentContext}`;
             
             console.log('[MeetingChat] Sending request to Gemini...');
             console.log('[MeetingChat] Prompt being sent:', prompt);
@@ -923,11 +948,9 @@ Keep your response under 7 sentences maximum. Be conversational and helpful.`;
     if (isChatMode) {
       try {
         console.log('[MainHandlers] 💬 Chat mode (fast path): Starting response...');
-        const { GoogleGenerativeAI } = await import("@google/generative-ai");
-        const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
-        const fastModel = genAI.getGenerativeModel({ 
-          model: "gemini-2.5-flash",
-          generationConfig: { temperature: 0.7, maxOutputTokens: 800 }
+        const OpenAI = (await import('openai')).default;
+        const openai = new OpenAI({
+          apiKey: process.env.OPENAI_API_KEY
         });
 
         // Get recent conversation for this renderer and append the current user turn
@@ -948,7 +971,12 @@ SCREENSHOT_NEEDED: [YES/NO]
 REASON: [brief reason]`;
 
         // Add timeout for analysis to prevent hanging
-        const analysisPromise = fastModel.generateContent(analysisPrompt);
+        const analysisPromise = openai.chat.completions.create({
+          model: "gpt-4o-mini",
+          messages: [{ role: "user", content: analysisPrompt }],
+          max_tokens: 100,
+          temperature: 0.3
+        });
         const timeoutPromise = new Promise((_, reject) => 
           setTimeout(() => reject(new Error('Analysis timeout')), 5000)
         );
@@ -956,7 +984,7 @@ REASON: [brief reason]`;
         let needsScreenshot = false;
         try {
           const analysisResult = await Promise.race([analysisPromise, timeoutPromise]) as any;
-          const analysisText = analysisResult.response.text();
+          const analysisText = analysisResult.choices[0]?.message?.content || '';
           needsScreenshot = analysisText.includes('SCREENSHOT_NEEDED: YES');
           console.log(`[MainHandlers] 💬 Chat fast path: Screenshot needed = ${needsScreenshot}`);
         } catch (timeoutError) {
@@ -990,14 +1018,21 @@ ${recentHistory || '(none)'}
 
 User: ${userPrompt}`;
 
-        const chatSession = fastModel.startChat();
-        const contentParts: any[] = [{ text: chatPrompt }];
+        // Prepare messages for OpenAI
+        const messages: any[] = [{ role: "user", content: [] }];
+        messages[0].content.push({ type: "text", text: chatPrompt });
         if (screenshotBase64) {
-          contentParts.push({ inlineData: { mimeType: "image/png", data: screenshotBase64 } });
+          messages[0].content.push({
+            type: "image_url",
+            image_url: {
+              url: `data:image/png;base64,${screenshotBase64}`
+            }
+          });
         }
 
         let fullAssistant = '';
         let streamStarted = false;
+
         
         // Set a timeout for the entire streaming operation
         const streamTimeout = setTimeout(() => {
@@ -1008,23 +1043,46 @@ User: ${userPrompt}`;
               message: "Response timeout. Please try again." 
             });
             event.sender.send("stream", { type: "stream_end" });
+            // Also send as ask-response for frontend compatibility
+            event.reply('ask-response', "Response timeout. Please try again.");
           }
-        }, 10000); // 10 second timeout
+        }, 20000); // 15 second timeout
         
         try {
-          const result = await chatSession.sendMessageStream(contentParts);
-          for await (const chunk of result.stream) {
-            const chunkText = chunk.text();
+          console.log('[MainHandlers] Starting GPT-4o stream...');
+          const stream = await openai.chat.completions.create({
+            model: "gpt-4o",
+            messages: messages,
+            max_tokens: 800,
+            temperature: 0.7,
+            stream: true
+          });
+          
+          for await (const chunk of stream) {
+            const chunkText = chunk.choices[0]?.delta?.content || '';
+            
             if (chunkText) {
               streamStarted = true;
               clearTimeout(streamTimeout); // Clear timeout once we get first chunk
-              event.sender.send("stream", { type: "text", content: chunkText });
+              
               fullAssistant += chunkText;
+              
+              // Send each chunk directly without complex deduplication
+              event.sender.send("stream", { type: "text", content: chunkText });
             }
           }
+          
+          console.log('[MainHandlers] Stream complete. Full response length:', fullAssistant.length);
           event.sender.send("stream", { type: "stream_end" });
+          
           if (fullAssistant.trim()) {
+            console.log('[MainHandlers] Sending ask-response with full text');
             appendToHistory(senderId, 'assistant', fullAssistant.trim());
+            // Also send as ask-response for frontend compatibility
+            event.reply('ask-response', fullAssistant.trim());
+            console.log('[MainHandlers] ask-response sent successfully');
+          } else {
+            console.warn('[MainHandlers] No response text to send!');
           }
         } finally {
           clearTimeout(streamTimeout);
@@ -1034,13 +1092,15 @@ User: ${userPrompt}`;
         console.error('[MainHandlers] Error details:', {
           message: error?.message,
           stack: error?.stack,
-          name: error?.name
+          name: error?.name,
+          code: error?.code,
+          status: error?.status
         });
         
         // Send a more informative error message
         const errorMessage = error?.message?.includes('API key') 
-          ? "API key issue. Please check your Gemini API key."
-          : error?.message?.includes('quota')
+          ? "API key issue. Please check your OpenAI API key."
+          : error?.message?.includes('quota') || error?.message?.includes('rate_limit')
           ? "API quota exceeded. Please try again later."
           : `Chat error: ${error?.message || 'Unknown error'}`;
         
@@ -1051,6 +1111,9 @@ User: ${userPrompt}`;
         
         // Also send stream_end to clean up UI state
         event.sender.send("stream", { type: "stream_end" });
+        
+        // Also send as ask-response for frontend compatibility
+        event.reply('ask-response', errorMessage);
       }
       return;
     }
@@ -1101,7 +1164,7 @@ User: ${userPrompt}`;
           // If this is a presentation task, prefer a browser workflow to Google Slides
           const isPresentation = /\b(presentation|slides|slide deck|deck|ppt|keynote)\b/i.test(userPrompt);
           if (isPresentation) {
-            const browser = await resolvePreferredBrowser();
+            const browser = 'Google Chrome'; // Default browser
             console.log(`[MainHandlers] 🎯 Presentation task detected — routing via browser: ${browser}`);
             appName = browser;
             isOpenCommand = true;
@@ -1109,7 +1172,7 @@ User: ${userPrompt}`;
             // If the suggested app isn't installed, fallback to browser
             try { await getBundleId(appName); }
             catch {
-              const browser = await resolvePreferredBrowser();
+              const browser = 'Google Chrome'; // Default browser
               console.log(`[MainHandlers] ⚠️ ${appName} not available — falling back to browser: ${browser}`);
               appName = browser;
               isOpenCommand = true;
@@ -1127,7 +1190,7 @@ User: ${userPrompt}`;
           if (appName === "NONE") {
             const isPresentation = /\b(presentation|slides|slide deck|deck|ppt|keynote)\b/i.test(userPrompt);
             if (isPresentation) {
-              const browser = await resolvePreferredBrowser();
+              const browser = 'Google Chrome'; // Default browser
               console.log(`[MainHandlers] 🎯 Presentation task with unknown app — choosing browser: ${browser}`);
               appName = browser;
               isOpenCommand = true;
@@ -1316,18 +1379,14 @@ User: ${userPrompt}`;
             // Fast two-step approach for chat mode
                          console.log('[MainHandlers] 💬 Chat mode: Starting fast response...', 'Prompt:', userPrompt);
             
-            // Step 1: Quick Gemini 2.5 Flash check (no screenshot) - should be ~1-2 seconds
-            const { GoogleGenerativeAI } = await import("@google/generative-ai");
-            const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
-            const fastModel = genAI.getGenerativeModel({ 
-              model: "gemini-2.5-flash",
-              generationConfig: {
-                temperature: 0.7,
-                maxOutputTokens: 800, // Reasonable response length for speed
-              }
+            // Step 1: Quick Groq Llama-4 check (no screenshot) - should be ~200-500ms
+            const { default: OpenAI } = await import("openai");
+            const groq = new OpenAI({
+              apiKey: process.env.GROQ_API_KEY || '',
+              baseURL: 'https://api.groq.com/openai/v1'
             });
 
-                         const analysisPrompt = `The user says: "${userPrompt}"
+            const analysisPrompt = `The user says: "${userPrompt}"
 
 TASK: Determine if this requires seeing the user's screen to answer properly.
 
@@ -1349,8 +1408,15 @@ Examples:
               console.log('[MainHandlers] 📚 Ask mode context (last 4 messages):');
               console.log(recentHistory || '(no previous messages)');
               appendToHistory(senderId, 'user', userPrompt);
-              const analysisResult = await fastModel.generateContent(analysisPrompt);
-              const analysisText = analysisResult.response.text();
+              
+              const analysisResult = await groq.chat.completions.create({
+                model: 'meta-llama/llama-4-scout-17b-16e-instruct',
+                messages: [{ role: 'user', content: analysisPrompt }],
+                max_tokens: 100,
+                temperature: 0.1
+              });
+              
+              const analysisText = analysisResult.choices[0].message.content?.trim() || '';
               
               const needsScreenshot = analysisText.includes('SCREENSHOT_NEEDED: YES');
 
@@ -1383,32 +1449,44 @@ ${recentHistory || '(none)'}
 
 ${screenshotBase64 ? 'Analyze what\'s visible on the screen and answer their question.' : 'Answer based on the context of their question.'}`;
 
-                const chatSession = fastModel.startChat();
-                const contentParts: any[] = [{ text: chatPrompt }];
-                if (screenshotBase64) {
-                  contentParts.push({
-                    inlineData: {
-                      mimeType: "image/png",
-                      data: screenshotBase64
+                // Use OpenAI for vision capability (Groq doesn't support images yet)
+                const { default: OpenAIClient } = await import("openai");
+                const openai = new OpenAIClient({
+                  apiKey: process.env.OPENAI_API_KEY || ''
+                });
+
+                const messages: any[] = [{
+                  role: 'user',
+                  content: screenshotBase64 ? [
+                    { type: 'text', text: chatPrompt },
+                    { 
+                      type: 'image_url', 
+                      image_url: { url: `data:image/png;base64,${screenshotBase64}` }
                     }
-                  });
-                }
+                  ] : chatPrompt
+                }];
 
                 let fullAssistant = '';
-                                 const result = await chatSession.sendMessageStream(contentParts);
+                const result = await openai.chat.completions.create({
+                  model: 'gpt-4o-mini',
+                  messages: messages,
+                  stream: true,
+                  max_tokens: 1000,
+                  temperature: 0.7
+                });
                  
-                 // Stream the response
-                 for await (const chunk of result.stream) {
-                   const chunkText = chunk.text();
-                   if (chunkText) {
-                     event.sender.send("stream", { type: "text", content: chunkText });
-                     fullAssistant += chunkText;
-                   }
-                 }
-                 event.sender.send("stream", { type: "stream_end" });
-                 if (fullAssistant.trim()) {
-                   appendToHistory(senderId, 'assistant', fullAssistant.trim());
-                 }
+                // Stream the response
+                for await (const chunk of result) {
+                  const chunkText = chunk.choices[0]?.delta?.content || '';
+                  if (chunkText) {
+                    event.sender.send("stream", { type: "text", content: chunkText });
+                    fullAssistant += chunkText;
+                  }
+                }
+                event.sender.send("stream", { type: "stream_end" });
+                if (fullAssistant.trim()) {
+                  appendToHistory(senderId, 'assistant', fullAssistant.trim());
+                }
               } else {
                 // Step 2: Always generate a proper conversational response (no screenshot needed)
                 console.log('[MainHandlers] 💬 No screenshot needed, generating conversational response...');
@@ -1422,17 +1500,23 @@ ${recentHistory || '(none)'}
 
 User: ${userPrompt}`;
 
-                console.log('[MainHandlers] 💬 Streaming Gemini 2.5 Flash conversational response...');
-                                 const result = await fastModel.generateContentStream(chatPrompt);
+                console.log('[MainHandlers] 💬 Streaming Groq Llama-4 conversational response...');
+                const result = await groq.chat.completions.create({
+                  model: 'meta-llama/llama-4-scout-17b-16e-instruct',
+                  messages: [{ role: 'user', content: chatPrompt }],
+                  stream: true,
+                  max_tokens: 800,
+                  temperature: 0.7
+                });
 
-                 let fullAssistant = '';
-                 for await (const chunk of result.stream) {
-                   const chunkText = chunk.text();
-                   if (chunkText) {
-                     event.sender.send('stream', { type: 'text', content: chunkText });
-                     fullAssistant += chunkText;
-                   }
-                 }
+                let fullAssistant = '';
+                for await (const chunk of result) {
+                  const chunkText = chunk.choices[0]?.delta?.content || '';
+                  if (chunkText) {
+                    event.sender.send('stream', { type: 'text', content: chunkText });
+                    fullAssistant += chunkText;
+                  }
+                }
                  event.sender.send('stream', { type: 'stream_end' });
                  if (fullAssistant.trim()) {
                    appendToHistory(senderId, 'assistant', fullAssistant.trim());
@@ -1497,10 +1581,8 @@ Provide a friendly greeting that invites them to ask for help with tasks. Be wel
       
       // In chat mode, prevent any actions like opening apps
       if (isChatMode && isOpenCommand) {
-        event.sender.send("reply", {
-          type: "error",
-          message: "I can't open apps in Chat mode. Switch to Agent mode if you want me to perform actions, or ask me about what's on your screen instead.",
-        });
+        // Let the natural response system handle this through contextual LLM responses
+        // No hardcoded mode switching messages
         return;
       }
       
@@ -1570,14 +1652,9 @@ Provide a friendly greeting that invites them to ask for help with tasks. Be wel
     const mainLogFolder = createLogFolder(userPrompt);
     console.log("\n");
 
-    // Planning path for multi-step tasks in agent mode
+    // Planning path for multi-step tasks in agent mode (disabled)
     if (isAgentMode) {
-      const plan = buildPlanForTask(userPrompt);
-      if (plan) {
-        console.log(`[MainHandlers] Executing structured plan for: ${userPrompt}`);
-        await executePlan(plan, event, history, isAgentMode);
-        return;
-      }
+      console.log(`[MainHandlers] Agent mode planning disabled - using direct automation`);
     }
 
     let done = false;
@@ -1733,7 +1810,7 @@ Do NOT describe the screen. Do NOT add anything else. Just use the exact format 
         
         new Notification({
           title: "Task complete",
-          body: "Opus's task is complete!",
+          body: "Neatly's task is complete!",
         }).show();
         
         // Note: Virtual cursor remains visible in agent mode after task completion
@@ -1768,14 +1845,9 @@ Do NOT describe the screen. Do NOT add anything else. Just use the exact format 
 
     
 
-    // Planning path for multi-step tasks in agent mode
+    // Planning path for multi-step tasks in agent mode (disabled)
     if (isAgentMode) {
-      const plan = buildPlanForTask(userPrompt);
-      if (plan) {
-        console.log(`[MainHandlers] Executing structured plan for: ${userPrompt}`);
-        await executePlan(plan, event, history, isAgentMode);
-        return;
-      }
+      console.log(`[MainHandlers] Agent mode planning disabled - using direct automation`);
     }
   });
 
@@ -1824,31 +1896,17 @@ Do NOT describe the screen. Do NOT add anything else. Just use the exact format 
   });
 
   // Browser Agent Mode handlers
-  ipcMain.on("start-browser-monitoring", async (_event) => {
-    try {
-      console.log('[MainHandlers] Starting NanoBrowser agent mode');
-      
-      // For NanoBrowser, we just need to verify Chrome is active
-      // We don't need the overlay or continuous monitoring
-      const activeBrowser = await browserDetection.getActiveBrowser();
-      if (activeBrowser?.name === 'Google Chrome') {
-        console.log('[MainHandlers] Chrome is active, NanoBrowser agent ready');
-        mainWindow?.webContents.send('nanobrowser-ready', true);
-      } else {
-        console.log('[MainHandlers] Chrome not active');
-        mainWindow?.webContents.send('nanobrowser-ready', false);
-      }
-    } catch (error) {
-      console.error('[MainHandlers] Error starting NanoBrowser agent:', error);
-    }
-  });
+  // Removed duplicate start-browser-monitoring handler; unified handler exists below
 
   ipcMain.on("stop-browser-monitoring", async (_event) => {
     try {
       console.log('[MainHandlers] Stopping browser monitoring for agent mode');
       browserDetection.stopMonitoring();
       browserDetection.removeAllListeners('browser-detected');
+      
+      // Note: macOS agent handles its own cleanup
       console.log('[MainHandlers] Browser monitoring stopped successfully');
+      
     } catch (error) {
       console.error('[MainHandlers] Error stopping browser monitoring:', error);
     }
@@ -1857,11 +1915,27 @@ Do NOT describe the screen. Do NOT add anything else. Just use the exact format 
   // Emergency stop handler
   ipcMain.on("emergency-stop-monitoring", async (_event) => {
     try {
-      console.log('[MainHandlers] Emergency stop - Closing NanoBrowser agent');
-      // For NanoBrowser, just close the sidebar
+      console.log('[MainHandlers] Emergency stop - Closing automation');
+      
+      // Note: macOS agent handles its own cleanup
+      console.log('[MainHandlers] Emergency stop: macOS agent handles its own cleanup');
+      
+      // For NanoBrowser, close the sidebar
       mainWindow?.webContents.send('nanobrowser-closed', true);
     } catch (error) {
       console.error('[MainHandlers] Error in emergency stop:', error);
+    }
+  });
+
+  // Helper to open macOS System Settings for screen recording permissions
+  ipcMain.on("open-screen-recording-settings", async (_event) => {
+    try {
+      console.log('[MainHandlers] Opening Screen Recording settings...');
+      const childProcess = await import('node:child_process');
+      // Open System Settings to Screen Recording permissions
+      childProcess.spawn('open', ['x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture']);
+    } catch (error) {
+      console.error('[MainHandlers] Failed to open Screen Recording settings:', error);
     }
   });
 
@@ -1911,6 +1985,30 @@ Do NOT describe the screen. Do NOT add anything else. Just use the exact format 
     }
   });
 
+  // Check accessibility permissions
+  ipcMain.handle('check-accessibility-permissions', async () => {
+    try {
+      // Use Swift script to check accessibility permissions
+      const swiftPath = path.join(app.getAppPath(), 'swift', 'accessibility.swift');
+      await execPromise(`swift ${swiftPath} --check-only`);
+      return { enabled: true };
+    } catch (error) {
+      // If Swift script fails, accessibility is not enabled
+      console.log('[MainHandlers] Accessibility check failed:', error);
+      return { enabled: false };
+    }
+  });
+
+  // Open System Settings to accessibility page
+  ipcMain.on('open-accessibility-settings', async () => {
+    try {
+      await execPromise('open "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"');
+      console.log('[MainHandlers] Opened accessibility settings');
+    } catch (error) {
+      console.error('[MainHandlers] Failed to open accessibility settings:', error);
+    }
+  });
+
   // Open Chrome browser
   ipcMain.on("open-chrome", async (_event) => {
     try {
@@ -1942,33 +2040,24 @@ Do NOT describe the screen. Do NOT add anything else. Just use the exact format 
     }
   });
 
-  // Handle Chrome agent activation (for continuing tasks)
-  ipcMain.on("chrome-agent-activated", async (_event) => {
-    try {
-      console.log('[MainHandlers] Chrome agent activated - ready to continue tasks');
-      // The task will automatically continue in Chrome agent since it's now active
-    } catch (error) {
-      console.error('[MainHandlers] Error handling Chrome agent activation:', error);
-    }
-  });
-
   // Handle NanoBrowser commands
   ipcMain.on("nanobrowser-command", async (event, command: string) => {
     try {
       console.log('[MainHandlers] NanoBrowser command received:', command);
+      console.log('[MainHandlers] Using macOS agent for NanoBrowser commands...');
 
-      // Skip Chrome activation - executor will launch its own dedicated Chrome instance
-      console.log('[MainHandlers] Skipping Chrome activation, proceeding with dedicated browser automation...');
-
-      // Prefer structured execution via executor
-      console.log('[MainHandlers] Importing executor...');
-      const { buildActionPlanFromCommand, executeActionPlan } = await import('./services/chrome/executor.ts');
-      console.log('[MainHandlers] Building action plan for command:', command);
-      const plan = buildActionPlanFromCommand(command);
-      console.log('[MainHandlers] Action plan:', plan);
-      console.log('[MainHandlers] Executing action plan...');
-      await executeActionPlan(plan, event, 'nanobrowser-response');
-      console.log('[MainHandlers] Action plan completed');
+      // Use macOS agent for all NanoBrowser commands
+      const { TerminatorMacOSAgent } = await import('./services/macos/TerminatorMacOSAgent.ts');
+      const { AgentOverlayService } = await import('./services/AgentOverlayService.ts');
+      
+      // Show blue overlay immediately with fade-in animation
+      const overlay = new AgentOverlayService();
+      await overlay.show();
+      
+      console.log('[MainHandlers] Executing macOS automation...');
+      const agent = new TerminatorMacOSAgent();
+      await agent.executeTask(command, event as any, 'nanobrowser-response');
+      console.log('[MainHandlers] Agent execution completed');
 
     } catch (error) {
       console.error('[MainHandlers] Error processing NanoBrowser command:', error);
@@ -1979,1207 +2068,155 @@ Do NOT describe the screen. Do NOT add anything else. Just use the exact format 
   // Handle NanoBrowser stop
   ipcMain.on("nanobrowser-stop", async (event) => {
     try {
-      console.log('[MainHandlers] 🛑 NanoBrowser stop requested');
+      console.log('[MainHandlers] 🛑 Automation stop requested');
       
-      // Stop any ongoing Chrome automation
-      const chrome = await import('./services/chrome/ChromeDevtoolsService');
-      const chromeService = chrome.default; // Already an instance
+      // Note: macOS agent handles its own cleanup
+      console.log('[MainHandlers] macOS agent handles its own cleanup');
       
-      // Try to close the browser instance if it exists
-      try {
-        if (chromeService && (chromeService as any).browser) {
-          console.log('[MainHandlers] Closing Chrome browser instance...');
-          await (chromeService as any).browser.close();
-          (chromeService as any).browser = null;
-          (chromeService as any).page = null;
-        }
-      } catch (closeError) {
-        console.warn('[MainHandlers] Error closing Chrome:', closeError);
-      }
-      
-      // Send confirmation back to UI
-      event.reply('nanobrowser-response', '🛑 Agent stopped successfully');
-      console.log('[MainHandlers] ✅ NanoBrowser stopped successfully');
+      event.reply('nanobrowser-response', 'Automation stopped');
       
     } catch (error) {
-      console.error('[MainHandlers] ❌ Error stopping NanoBrowser:', error);
-      event.reply('nanobrowser-response', `❌ Error stopping: ${error}`);
+      console.error('[MainHandlers] Error stopping automation:', error);
+      event.reply('nanobrowser-response', `Error: ${error}`);
     }
   });
 
   // Intelligent Gemini-powered macOS command handler
-  ipcMain.on("gemini-macos-command", async (event, userInput: string) => {
+  ipcMain.on("gemini-macos-command", async (event, userInput: string, conversationHistory?: Array<{role: 'user' | 'assistant', content: string}>) => {
     try {
       console.log('[MainHandlers] Processing Gemini macOS command:', userInput);
       
-      // Quick check for obvious conversational inputs - skip Gemini for speed
-      const lowerInput = userInput.toLowerCase().trim();
-      const conversationalWords = ['hi', 'hello', 'hey', 'how are you', 'what\'s up', 'sup', 'howdy', 'greetings'];
+      // Immediately reset UI to thinking state for new requests
+      event.reply('gemini-macos-response', {
+        type: 'thinking',
+        content: ''
+      });
       
-      if (conversationalWords.some(word => lowerInput === word || lowerInput.startsWith(word))) {
-        console.log('[MainHandlers] Detected conversational input, using quick response');
-        event.reply('gemini-macos-response', {
-          type: 'conversation',
-          content: 'Hey there! 👋 Head over to Chat mode for conversations. I\'m your browser automation buddy - try "open google" or "new tab"!'
-        });
-        return;
+      // Get any uploaded images for this sender
+      const uploadedImages = (event.sender as any).uploadedImages || [];
+      if (uploadedImages.length > 0) {
+        console.log('[MainHandlers] MacOS Agent including', uploadedImages.length, 'uploaded images');
+        // Clear images after use
+        (event.sender as any).uploadedImages = [];
       }
       
-      // Check for complex browser tasks that require Chrome + nanobrowser
-      const complexBrowserTasks = [
-        'flight', 'book', 'hotel', 'reservation', 'buy', 'purchase', 'shop', 'order',
-        'form', 'signup', 'login', 'account', 'checkout', 'cart', 'search for',
-        'find me', 'look for', 'browse', 'website', 'site'
-      ];
+      // Use LLM to intelligently determine if this is conversational vs actionable
+      const { GoogleGenerativeAI } = await import('@google/generative-ai');
+      const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
+      const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash-lite' });
       
-      const isComplexTask = complexBrowserTasks.some(task => lowerInput.includes(task)) || 
-                           (lowerInput.includes('open') && lowerInput.includes('chrome')) ||
-                           lowerInput.length > 50; // Long requests likely need browser automation
+      // Build context from conversation history
+      const contextString = conversationHistory && conversationHistory.length > 0 
+        ? `\n\nConversation context:\n${conversationHistory.slice(-4).map(msg => `${msg.role}: ${msg.content}`).join('\n')}`
+        : '';
       
-      if (isComplexTask) {
-        console.log('[MainHandlers] Detected complex browser task, skipping Chrome activation for agent mode...');
-        
-        // For complex browser tasks, skip Chrome activation and go directly to nanobrowser
-        // Nanobrowser will launch its own dedicated Chrome instance, so we don't need
-        // to check or activate the regular Chrome browser
-        console.log('[MainHandlers] Complex browser task detected - executing nanobrowser automation immediately');
-        
-        event.reply('gemini-macos-response', {
-          type: 'browser_action',
-          content: 'I can help with that! Starting browser automation...'
-        });
-        
-        // Execute the nanobrowser command immediately instead of just storing it
-        console.log('[MainHandlers] Immediately executing nanobrowser command:', userInput);
-        
-        try {
-          // Import and execute nanobrowser command directly
-          const { buildActionPlanFromCommand, executeActionPlan } = await import('./services/chrome/executor.ts');
-          console.log('[MainHandlers] Building action plan for command:', userInput);
-          const plan = buildActionPlanFromCommand(userInput);
-          console.log('[MainHandlers] Action plan:', plan);
-          console.log('[MainHandlers] Executing action plan...');
-          await executeActionPlan(plan, event, 'gemini-macos-response');
-          console.log('[MainHandlers] Action plan completed');
-        } catch (error) {
-          console.error('[MainHandlers] Error executing immediate nanobrowser command:', error);
-          event.reply('gemini-macos-response', {
-            type: 'conversation',
-            content: `Error starting browser automation: ${error}`
-          });
-        }
-        return;
-      }
-      
-      // Use Gemini to determine intent and generate response for simple tasks
-      const prompt = `You are a browser automation assistant for macOS. Your main job is to help with browser commands, not general conversation.
+      const classificationPrompt = `Analyze this user input and determine if it requires automation or is conversational:
 
-User input: "${userInput}"
+User input: "${userInput}"${contextString}
 
-Analyze this input and respond with JSON in this format:
+Respond with JSON only:
 {
-  "type": "conversation" | "browser_action",
-  "response": "Your response to the user",
-  "applescript": "AppleScript commands if this is a browser action (optional)"
+  "type": "automation" | "conversational",
+  "response": "contextual response if conversational, empty if automation"
 }
 
-If it's casual conversation (like "hi", "hello", "how are you"), respond briefly but redirect them to Ask mode for chatting.
-If it's a browser command, provide both a response and the AppleScript commands.
-
-Browser actions you can handle:
-- "open google" -> Opens Google.com
-- "search for X" -> Searches Google for X  
-- "go back" -> Browser back button
-- "go forward" -> Browser forward button
-- "refresh" -> Refresh page
-- "new tab" -> Open new tab
-- "close tab" -> Close current tab
-
-Examples:
-- "hi" -> {"type": "conversation", "response": "Hi! I'm your browser automation assistant. For general chatting, please use Ask mode. I'm here to help with browser commands like 'open google' or 'search for something'."}
-- "how are you" -> {"type": "conversation", "response": "I'm doing well, thanks! For conversations, try Ask mode. I specialize in browser automation - try commands like 'new tab' or 'go back'."}
-- "open google" -> {"type": "browser_action", "response": "Opening Google for you!", "applescript": "tell application \\"System Events\\" to keystroke \\"l\\" using command down; delay 0.5; tell application \\"System Events\\" to keystroke \\"google.com\\"; delay 0.5; tell application \\"System Events\\" to key code 36"}`;
+Guidelines:
+- "automation": Tasks requiring system actions (open apps, browse web, file operations, messaging, calculations, etc.)
+  * Common automation patterns: "message/text [person]", "open [app]", "go to [website]", "calculate [math]", "search for [topic]"
+  * ANY task involving apps is automation: "use [app]", "talk to [app]", "conversation with [app]", "chat with [app]"
+  * Include commands with typos or informal language that clearly indicate actions
+  * If it mentions an app name (ChatGPT, Safari, Messages, etc.) → automation
+- "conversational": Pure greetings, thank you, casual responses, acknowledgments, questions about the assistant
+  * ONLY when NO apps, actions, or tasks are mentioned
+- Consider conversation context - if they just completed a task and say "thanks", respond conversationally  
+- Be intelligent about context - "open safari" = automation, "thanks that worked!" = conversational
+- When in doubt, prefer automation - better to try automating than miss a legitimate request`;
 
       try {
-        console.log('[MainHandlers] Starting Gemini API call...');
+        const classificationResult = await model.generateContent(classificationPrompt);
+        const classificationText = classificationResult.response.text().trim();
         
-        // Check if API key exists
-        const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
-        if (!apiKey) {
-          throw new Error('GEMINI_API_KEY or GOOGLE_API_KEY not found in environment variables');
+        // Clean markdown formatting from LLM response
+        let cleanJson = classificationText;
+        if (classificationText.includes('```json')) {
+          cleanJson = classificationText.replace(/```json\s*/, '').replace(/```\s*$/, '').trim();
+        } else if (classificationText.includes('```')) {
+          cleanJson = classificationText.replace(/```\s*/, '').replace(/```\s*$/, '').trim();
         }
-        console.log('[MainHandlers] API key found, length:', apiKey.length);
         
-        // Use Gemini directly for text generation
-        const { GoogleGenerativeAI } = await import('@google/generative-ai');
-        const genAI = new GoogleGenerativeAI(apiKey);
-        const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+        const classification = JSON.parse(cleanJson);
+        console.log('[MainHandlers] Classification result:', classification);
         
-        console.log('[MainHandlers] Sending prompt to Gemini...');
-        
-        // Add timeout to prevent hanging
-        const timeoutPromise = new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Gemini API timeout after 3 seconds')), 3000)
-        );
-        
-        const result = await Promise.race([
-          model.generateContent(prompt),
-          timeoutPromise
-        ]) as any;
-        
-        const response = result.response.text();
-        console.log('[MainHandlers] Gemini response received:', response.substring(0, 100) + '...');
-        
-        try {
-          // Clean up response - remove markdown code blocks if present
-          let cleanResponse = response.trim();
-          if (cleanResponse.startsWith('```json')) {
-            cleanResponse = cleanResponse.replace(/^```json\s*/, '').replace(/\s*```$/, '');
-          } else if (cleanResponse.startsWith('```')) {
-            cleanResponse = cleanResponse.replace(/^```\s*/, '').replace(/\s*```$/, '');
-          }
-          
-          const parsedResponse = JSON.parse(cleanResponse);
-          
-          // If it's a browser action with AppleScript, execute it
-          if (parsedResponse.type === 'browser_action' && parsedResponse.applescript) {
-            try {
-              // Split multiple commands and execute them
-              const commands = parsedResponse.applescript.split(';');
-              for (const cmd of commands) {
-                const trimmedCmd = cmd.trim();
-                if (trimmedCmd) {
-                  await execPromise(`osascript -e '${trimmedCmd}'`);
-                }
-              }
-              console.log('[MainHandlers] AppleScript executed successfully');
-            } catch (error) {
-              console.error('[MainHandlers] AppleScript execution failed:', error);
-              parsedResponse.response = `I tried to ${userInput.toLowerCase()}, but encountered an error: ${error}`;
-            }
-          }
-          
-          event.reply('gemini-macos-response', {
-            type: parsedResponse.type,
-            content: parsedResponse.response
-          });
-          
-        } catch (parseError) {
-          console.error('[MainHandlers] Failed to parse Gemini response:', parseError);
-          // Fallback: treat as conversation
+        if (classification.type === 'conversational' && classification.response) {
+          console.log('[MainHandlers] LLM classified as conversational, responding directly');
           event.reply('gemini-macos-response', {
             type: 'conversation',
-            content: response || "I heard you, but I'm having trouble processing that request right now."
+            content: classification.response
           });
+          return;
+        } else if (classification.type === 'conversational') {
+          console.log('[MainHandlers] Conversational but no response provided, generating default');
+          event.reply('gemini-macos-response', {
+            type: 'conversation',
+            content: 'Hello! How can I help you today?'
+          });
+          return;
         }
-             } catch (geminiError) {
-         console.error('[MainHandlers] Gemini API error:', geminiError);
-         console.log('[MainHandlers] Attempting OpenAI fallback...');
-         
-         // Try OpenAI as fallback
-         if (openaiClient) {
-           try {
-             const completion = await openaiClient.chat.completions.create({
-               model: 'gpt-4o-mini',
-               messages: [
-                 { 
-                   role: 'system', 
-                   content: `You are a browser automation assistant for macOS. Your main job is to help with browser commands, not general conversation.
-
-If it's casual conversation (like "hi", "hello", "how are you"), respond briefly but redirect them to Ask mode for chatting.
-If it's a browser command, provide both a response and the AppleScript commands.
-
-Browser actions you can handle:
-- "open google" -> Opens Google.com
-- "search for X" -> Searches Google for X  
-- "go back" -> Browser back button
-- "go forward" -> Browser forward button
-- "refresh" -> Refresh page
-- "new tab" -> Open new tab
-- "close tab" -> Close current tab
-
-Respond with JSON in this format:
-{
-  "type": "conversation" | "browser_action",
-  "response": "Your response to the user",
-  "applescript": "AppleScript commands if this is a browser action (optional)"
-}`
-                 },
-                 { role: 'user', content: userInput }
-               ],
-               max_tokens: 300,
-               temperature: 0.3
-             });
-             
-             const response = completion.choices[0]?.message?.content?.trim() || '';
-             console.log('[MainHandlers] OpenAI fallback response received');
-             
-             // Same JSON parsing logic as Gemini
-             let cleanResponse = response.trim();
-             if (cleanResponse.startsWith('```json')) {
-               cleanResponse = cleanResponse.replace(/^```json\s*/, '').replace(/\s*```$/, '');
-             } else if (cleanResponse.startsWith('```')) {
-               cleanResponse = cleanResponse.replace(/^```\s*/, '').replace(/\s*```$/, '');
-             }
-             
-             const parsedResponse = JSON.parse(cleanResponse);
-             
-             // If it's a browser action with AppleScript, execute it
-             if (parsedResponse.type === 'browser_action' && parsedResponse.applescript) {
-               try {
-                 // Split multiple commands and execute them
-                 const commands = parsedResponse.applescript.split(';');
-                 for (const cmd of commands) {
-                   const trimmedCmd = cmd.trim();
-                   if (trimmedCmd) {
-                     await execPromise(`osascript -e '${trimmedCmd}'`);
-                   }
-                 }
-                 console.log('[MainHandlers] AppleScript executed successfully (OpenAI)');
-               } catch (error) {
-                 console.error('[MainHandlers] AppleScript execution failed:', error);
-                 parsedResponse.response = `I tried to ${userInput.toLowerCase()}, but encountered an error: ${error}`;
-               }
-             }
-             
-             event.reply('gemini-macos-response', {
-               type: parsedResponse.type,
-               content: parsedResponse.response
-             });
-             
-           } catch (openaiError) {
-             console.error('[MainHandlers] OpenAI fallback also failed:', openaiError);
-             
-             // Final fallback to static responses
-             const lowerInput = userInput.toLowerCase();
-             let fallbackResponse = '';
-             
-             if (lowerInput.includes('google')) {
-               fallbackResponse = 'I can help with that! Try: "open google" or "search for something"';
-             } else if (lowerInput.includes('search')) {
-               fallbackResponse = 'Try: "search for [your query]" and I\'ll open Google search for you.';
-             } else if (lowerInput.includes('tab')) {
-               fallbackResponse = 'I can help with tabs! Try: "new tab" or "close tab"';
-             } else {
-               fallbackResponse = 'I help with browser commands like "open google", "new tab", or "go back". For chatting, use Ask mode.';
-             }
-             
-             event.reply('gemini-macos-response', {
-               type: 'conversation',
-               content: fallbackResponse
-             });
-           }
-         } else {
-           // No OpenAI available, use static fallback
-           const lowerInput = userInput.toLowerCase();
-           let fallbackResponse = '';
-           
-           if (lowerInput.includes('google')) {
-             fallbackResponse = 'I can help with that! Try: "open google" or "search for something"';
-           } else if (lowerInput.includes('search')) {
-             fallbackResponse = 'Try: "search for [your query]" and I\'ll open Google search for you.';
-           } else if (lowerInput.includes('tab')) {
-             fallbackResponse = 'I can help with tabs! Try: "new tab" or "close tab"';
-           } else {
-             fallbackResponse = 'I help with browser commands like "open google", "new tab", or "go back". For chatting, use Ask mode.';
-           }
-           
-           event.reply('gemini-macos-response', {
-             type: 'conversation',
-             content: fallbackResponse
-           });
-         }
-       }
-      
-    } catch (error) {
-      console.error('[MainHandlers] Gemini macOS command failed:', error);
-      event.reply('gemini-macos-response', {
-        type: 'conversation', 
-        content: "Sorry, I'm having trouble processing your request right now. Please try again."
-      });
-    }
-  });
-
-  // AppleScript command handler (for when Chrome isn't active)
-  ipcMain.on("applescript-command", async (event, command: string) => {
-    try {
-      console.log('[MainHandlers] AppleScript command received:', command);
-      
-      // Parse the command and execute appropriate AppleScript
-      let response = '';
-      
-      if (command.toLowerCase().includes('open') && command.toLowerCase().includes('google')) {
-        // Open Google
-        await execPromise(`osascript -e 'tell application "System Events" to keystroke "l" using command down'`);
-        await execPromise(`osascript -e 'tell application "System Events" to keystroke "google.com"'`);
-        await execPromise(`osascript -e 'tell application "System Events" to key code 36'`); // Enter key
-        response = 'Opening Google.com';
-      } else if (command.toLowerCase().includes('search')) {
-        // Extract search query
-        const searchMatch = command.match(/search(?:\s+for)?\s+(.+)/i);
-        if (searchMatch) {
-          const query = searchMatch[1];
-          await execPromise(`osascript -e 'tell application "System Events" to keystroke "l" using command down'`);
-          await execPromise(`osascript -e 'tell application "System Events" to keystroke "https://google.com/search?q=${encodeURIComponent(query)}"'`);
-          await execPromise(`osascript -e 'tell application "System Events" to key code 36'`); // Enter key
-          response = `Searching for: ${query}`;
-        } else {
-          response = 'Please specify what to search for';
-        }
-      } else if (command.toLowerCase().includes('new tab')) {
-        // Open new tab
-        await execPromise(`osascript -e 'tell application "System Events" to keystroke "t" using command down'`);
-        response = 'Opened new tab';
-      } else if (command.toLowerCase().includes('close tab')) {
-        // Close current tab
-        await execPromise(`osascript -e 'tell application "System Events" to keystroke "w" using command down'`);
-        response = 'Closed current tab';
-      } else if (command.toLowerCase().includes('back')) {
-        // Go back
-        await execPromise(`osascript -e 'tell application "System Events" to keystroke "[" using command down'`);
-        response = 'Navigated back';
-      } else if (command.toLowerCase().includes('forward')) {
-        // Go forward
-        await execPromise(`osascript -e 'tell application "System Events" to keystroke "]" using command down'`);
-        response = 'Navigated forward';
-      } else if (command.toLowerCase().includes('refresh') || command.toLowerCase().includes('reload')) {
-        // Refresh page
-        await execPromise(`osascript -e 'tell application "System Events" to keystroke "r" using command down'`);
-        response = 'Page refreshed';
-      } else if (command.toLowerCase().includes('scroll')) {
-        // Scroll actions
-        if (command.toLowerCase().includes('down')) {
-          await execPromise(`osascript -e 'tell application "System Events" to key code 125'`); // Down arrow
-          response = 'Scrolled down';
-        } else if (command.toLowerCase().includes('up')) {
-          await execPromise(`osascript -e 'tell application "System Events" to key code 126'`); // Up arrow
-          response = 'Scrolled up';
-        } else {
-          response = 'Please specify scroll direction (up/down)';
-        }
-      } else {
-        // Default response for unrecognized commands
-        response = `I can help you with browser navigation using system commands. Try:
-- "Open Google"
-- "Search for [query]"
-- "New tab"
-- "Close tab"
-- "Go back/forward"
-- "Refresh page"
-- "Scroll up/down"`;
+      } catch (classificationError) {
+        console.log('[MainHandlers] LLM classification failed, proceeding with automation:', classificationError);
+        // If classification fails, default to treating as automation request
       }
       
-      event.reply("applescript-response", response);
-    } catch (error) {
-      console.error('[MainHandlers] Error executing AppleScript command:', error);
-      event.reply("applescript-response", `Error: ${error}`);
-    }
-  });
-
-  // Handle sidebar state changes
-  ipcMain.on("sidebar-state-changed", async (_event, data: { isOpen: boolean, width: number }) => {
-    try {
-      console.log('[MainHandlers] Sidebar state changed:', data);
-      // Browser resizing temporarily disabled to prevent crashes
-      // TODO: Re-enable with proper error handling and throttling
-    } catch (error) {
-      console.error('[MainHandlers] Error handling sidebar state change:', error);
-    }
-  });
-
-     // Enhanced browser automation function
-  // Commented out - not currently used
-  /*
-  async function executeComplexBrowserCommand(command: string, activeBrowser: any): Promise<{success: boolean, message: string}> {
-    const lowerCommand = command.toLowerCase();
-    
-    try {
-      // Complex multi-step automation like BrowserOS
+      // Agent mode: Use intelligent system for automation requests
+      console.log('[MainHandlers] Agent mode - using intelligent agent system for:', userInput);
       
-      // Flight booking automation with smart parsing and real browser automation
-      if (lowerCommand.includes('book') && (lowerCommand.includes('flight') || lowerCommand.includes('plane') || lowerCommand.includes('trip'))) {
-        console.log('[BrowserOS Agent] Starting flight booking automation');
+      // Add conversation context to the task if available
+      let contextualTask = userInput;
+      if (conversationHistory && conversationHistory.length > 0) {
+        const recentContext = conversationHistory.slice(-4).map(msg => 
+          `${msg.role}: ${msg.content}`
+        ).join('\n');
+        contextualTask = `Previous conversation context:\n${recentContext}\n\nCurrent request: ${userInput}`;
+        console.log('[MainHandlers] Including conversation context for agent task');
+      }
+      
+      // Execute the intelligent AI automation immediately
+      console.log('[MainHandlers] Executing intelligent automation:', contextualTask);
+      
+      try {
+        // Always use macOS agent for everything - no more complex routing!
+        console.log('[MainHandlers] 🖥️ Using macOS agent for all tasks (browser + desktop)');
+        console.log('[MainHandlers] 🔍 IMPORTANT: Using MACOS AGENT with scanning for everything!');
         
-        // Extract details from the command
-        const destinationMatch = command.match(/to\s+([A-Za-z\s]+?)(?:\s+from|\s+on|\s+for|$)/i);
-        const originMatch = command.match(/from\s+([A-Za-z\s]+?)(?:\s+to|\s+on|\s+for|$)/i);
-        const dateMatch = command.match(/(tomorrow|next\s+\w+|today|\d{1,2}\/\d{1,2})/i);
+        const { TerminatorMacOSAgent } = await import('./services/macos/TerminatorMacOSAgent.ts');
+        const { AgentOverlayService } = await import('./services/AgentOverlayService.ts');
         
-        console.log('[BrowserOS Agent] Extracted details:', {
-          origin: originMatch?.[1],
-          destination: destinationMatch?.[1], 
-          date: dateMatch?.[1]
+        // Show blue overlay immediately with fade-in animation
+        const overlay = new AgentOverlayService();
+        await overlay.show();
+        
+        console.log('[MainHandlers] Executing macOS automation...');
+        const agent = new TerminatorMacOSAgent();
+        currentAgent = agent; // Store reference for termination
+        agent.executeTask(contextualTask, event as any, 'gemini-macos-response');
+        
+        console.log('[MainHandlers] AI action plan completed');
+      } catch (error) {
+        console.error('[MainHandlers] Error executing AI automation:', error);
+        event.reply('gemini-macos-response', {
+          type: 'conversation',
+          content: `Error starting intelligent automation: ${error}`
         });
-        
-        let url = "https://www.google.com/travel/flights";
-        if (destinationMatch) {
-          const destination = destinationMatch[1].trim();
-          url += `?q=flights+to+${encodeURIComponent(destination)}`;
-        }
-        
-        console.log('[BrowserOS Agent] Opening Google Flights:', url);
-        await execPromise(`osascript -e 'tell application "${activeBrowser.name}" to open location "${url}"'`);
-        
-        // Real browser automation - wait for page load then interact with elements
-        setTimeout(async () => {
-          try {
-            console.log('[BrowserOS Agent] Starting flight booking automation...');
-            
-            // Simulate clicking and typing using AppleScript (basic automation)
-            if (originMatch) {
-              console.log(`[BrowserOS Agent] Setting departure: ${originMatch[1]}`);
-              // Focus on departure input and type
-              await execPromise(`osascript -e '
-                tell application "System Events"
-                  tell process "${activeBrowser.name}"
-                    click (text field 1 of group 1 of UI element 1 of scroll area 1 of group 1 of group 1 of tab group 1 of splitter group 1 of window 1)
-                    delay 0.5
-                    set the clipboard to "${originMatch[1]}"
-                    keystroke "v" using command down
-                    delay 1
-                    key code 36
-                  end tell
-                end tell'`);
-            }
-            
-            if (destinationMatch) {
-              console.log(`[BrowserOS Agent] Setting destination: ${destinationMatch[1]}`);
-              // Focus on destination input and type
-              await execPromise(`osascript -e '
-                tell application "System Events"
-                  tell process "${activeBrowser.name}"
-                    click (text field 2 of group 1 of UI element 1 of scroll area 1 of group 1 of group 1 of tab group 1 of splitter group 1 of window 1)
-                    delay 0.5
-                    set the clipboard to "${destinationMatch[1]}"
-                    keystroke "v" using command down
-                    delay 1
-                    key code 36
-                  end tell
-                end tell'`);
-            }
-            
-            if (dateMatch) {
-              console.log(`[BrowserOS Agent] Setting date: ${dateMatch[1]}`);
-              // This would interact with date picker
-            }
-            
-            console.log('[BrowserOS Agent] Flight booking form populated');
-          } catch (automationError) {
-            console.error('[BrowserOS Agent] Automation error:', automationError);
-            console.log('[BrowserOS Agent] Falling back to manual interaction');
-          }
-        }, 3000); // Wait 3 seconds for page to load
-        
-        return { success: true, message: `Opening Google Flights and automating booking${destinationMatch ? ` to ${destinationMatch[1]}` : ''}...` };
       }
-      
-      // Hotel booking automation
-      if (lowerCommand.includes('book') && (lowerCommand.includes('hotel') || lowerCommand.includes('room') || lowerCommand.includes('stay'))) {
-        await execPromise(`osascript -e 'tell application "${activeBrowser.name}" to open location "https://www.booking.com"'`);
-        return { success: true, message: 'Opening Booking.com for hotel reservations...' };
-      }
-      
-      // Restaurant booking automation
-      if (lowerCommand.includes('book') && (lowerCommand.includes('restaurant') || lowerCommand.includes('table') || lowerCommand.includes('dinner'))) {
-        await execPromise(`osascript -e 'tell application "${activeBrowser.name}" to open location "https://www.opentable.com"'`);
-        return { success: true, message: 'Opening OpenTable for restaurant reservations...' };
-      }
-      
-      // Shopping automation - BrowserOS-style with history awareness
-      if (lowerCommand.includes('buy') || lowerCommand.includes('shop') || lowerCommand.includes('order')) {
-        const shoppingQuery = command.replace(/buy|shop|order/gi, '').trim();
-        
-        // Check for specific requests like "from my order history"
-        if (lowerCommand.includes('history') || lowerCommand.includes('again') || lowerCommand.includes('reorder')) {
-          await execPromise(`osascript -e 'tell application "${activeBrowser.name}" to open location "https://www.amazon.com/gp/your-account/order-history"'`);
-          
-          // Simulate agent searching in order history
-          setTimeout(async () => {
-            console.log('[BrowserOS Agent] Searching order history for:', shoppingQuery);
-            // In a real BrowserOS implementation, this would use page automation
-          }, 2000);
-          
-          return { success: true, message: `Searching your order history for: ${shoppingQuery}` };
-        } else {
-          await execPromise(`osascript -e 'tell application "${activeBrowser.name}" to open location "https://www.amazon.com/s?k=${encodeURIComponent(shoppingQuery)}"'`);
-          return { success: true, message: `Searching Amazon for: ${shoppingQuery}` };
-        }
-      }
-      
-      // Email automation
-      if (lowerCommand.includes('email') || lowerCommand.includes('send') || lowerCommand.includes('compose')) {
-        await execPromise(`osascript -e 'tell application "${activeBrowser.name}" to open location "https://mail.google.com/mail/u/0/#compose"'`);
-        return { success: true, message: 'Opening Gmail compose...' };
-      }
-      
-      // Social media automation
-      if (lowerCommand.includes('post') || lowerCommand.includes('tweet') || lowerCommand.includes('share')) {
-        await execPromise(`osascript -e 'tell application "${activeBrowser.name}" to open location "https://twitter.com/compose/tweet"'`);
-        return { success: true, message: 'Opening Twitter compose...' };
-      }
-      
-      // YouTube automation
-      if (lowerCommand.includes('watch') || lowerCommand.includes('video') || lowerCommand.includes('youtube')) {
-        const videoQuery = command.replace(/watch|video|youtube/gi, '').trim();
-        await execPromise(`osascript -e 'tell application "${activeBrowser.name}" to open location "https://www.youtube.com/results?search_query=${encodeURIComponent(videoQuery)}"'`);
-        return { success: true, message: `Searching YouTube for: ${videoQuery}` };
-      }
-      
-      // Calendar/schedule automation
-      if (lowerCommand.includes('schedule') || lowerCommand.includes('calendar') || lowerCommand.includes('meeting')) {
-        await execPromise(`osascript -e 'tell application "${activeBrowser.name}" to open location "https://calendar.google.com"'`);
-        return { success: true, message: 'Opening Google Calendar...' };
-      }
-      
-      // Document automation
-      if (lowerCommand.includes('document') || lowerCommand.includes('write') || lowerCommand.includes('doc')) {
-        await execPromise(`osascript -e 'tell application "${activeBrowser.name}" to open location "https://docs.google.com/document/create"'`);
-        return { success: true, message: 'Creating new Google Doc...' };
-      }
-      
-      // Weather automation
-      if (lowerCommand.includes('weather') || lowerCommand.includes('forecast')) {
-        const location = command.replace(/weather|forecast/gi, '').trim() || 'current location';
-        await execPromise(`osascript -e 'tell application "${activeBrowser.name}" to open location "https://www.google.com/search?q=weather+${encodeURIComponent(location)}"'`);
-        return { success: true, message: `Getting weather for: ${location}` };
-      }
-      
-      // News automation
-      if (lowerCommand.includes('news') || lowerCommand.includes('headlines')) {
-        await execPromise(`osascript -e 'tell application "${activeBrowser.name}" to open location "https://news.google.com"'`);
-        return { success: true, message: 'Opening Google News...' };
-      }
-      
-      // Advanced BrowserOS-style multi-step tasks
-      
-      // Fill forms automation
-      if (lowerCommand.includes('fill') && (lowerCommand.includes('form') || lowerCommand.includes('application'))) {
-        console.log('[BrowserOS Agent] Form filling request detected');
-        return { success: true, message: 'Ready to help fill forms. Click on the form field you want to start with.' };
-      }
-      
-      // Research automation - open multiple tabs
-      if (lowerCommand.includes('research') || lowerCommand.includes('compare')) {
-        const topic = command.replace(/research|compare/gi, '').trim();
-        
-        // Open multiple research sources
-        const sources = [
-          `https://www.google.com/search?q=${encodeURIComponent(topic)}`,
-          `https://en.wikipedia.org/wiki/${encodeURIComponent(topic.replace(/ /g, '_'))}`,
-          `https://scholar.google.com/scholar?q=${encodeURIComponent(topic)}`
-        ];
-        
-        for (const source of sources) {
-          await execPromise(`osascript -e 'tell application "${activeBrowser.name}" to open location "${source}"'`);
-          await new Promise(resolve => setTimeout(resolve, 500)); // Small delay between tabs
-        }
-        
-        return { success: true, message: `Opening research tabs for: ${topic}` };
-      }
-      
-      // Tab management automation
-      if (lowerCommand.includes('close') && lowerCommand.includes('tab')) {
-        if (lowerCommand.includes('all')) {
-          await execPromise(`osascript -e 'tell application "${activeBrowser.name}" to close every window'`);
-          return { success: true, message: 'Closed all tabs' };
-        } else {
-          await execPromise(`osascript -e 'tell application "${activeBrowser.name}" to close current tab of window 1'`);
-          return { success: true, message: 'Closed current tab' };
-        }
-      }
-      
-      // Download automation
-      if (lowerCommand.includes('download') || lowerCommand.includes('save')) {
-        const item = command.replace(/download|save/gi, '').trim();
-        console.log('[BrowserOS Agent] Download request for:', item);
-        // In BrowserOS, this would trigger download detection
-        return { success: true, message: `Ready to download: ${item}. Click on the download link when you find it.` };
-      }
-      
-      // Login automation
-      if (lowerCommand.includes('login') || lowerCommand.includes('sign in')) {
-        const service = command.match(/(google|github|facebook|twitter|linkedin|amazon)/i)?.[1] || 'website';
-        console.log('[BrowserOS Agent] Login assistance for:', service);
-        return { success: true, message: `Ready to help you login to ${service}. Navigate to the login page.` };
-      }
-      
-      // Extract/scrape data
-      if (lowerCommand.includes('extract') || lowerCommand.includes('scrape') || lowerCommand.includes('copy all')) {
-        console.log('[BrowserOS Agent] Data extraction request');
-        // In BrowserOS, this would trigger content extraction
-        return { success: true, message: 'Ready to extract data. Highlight the content you want to extract.' };
-      }
-      
-      // Summarize page content
-      if (lowerCommand.includes('summarize') || lowerCommand.includes('tldr')) {
-        console.log('[BrowserOS Agent] Page summarization request');
-        
-        // Get page content using AppleScript and analyze it
-        setTimeout(async () => {
-          try {
-            // Get page text content
-            const pageContentScript = `
-              tell application "${activeBrowser.name}"
-                tell active tab of window 1
-                  execute javascript "document.body.innerText"
-                end tell
-              end tell
-            `;
-            
-            const { stdout: pageText } = await execPromise(`osascript -e '${pageContentScript}'`);
-            
-            // In a real implementation, this would be sent to AI for summarization
-            console.log('[BrowserOS Agent] Page content extracted for summarization');
-            console.log('[BrowserOS Agent] Content length:', pageText.length);
-            
-            // Send page content to AI (placeholder - would use OpenAI API)
-            // const summary = await generateSummary(pageText);
-            
-          } catch (error) {
-            console.error('[BrowserOS Agent] Failed to extract page content:', error);
-          }
-        }, 1000);
-        
-        return { success: true, message: 'Analyzing page content for summary...' };
-      }
-      
-      // General task automation - catch-all for complex tasks
-      if (lowerCommand.includes('help me') || lowerCommand.includes('automate') || 
-          lowerCommand.includes('do this') || lowerCommand.includes('complete this')) {
-        console.log('[BrowserOS Agent] General automation request');
-        
-        // Real browser automation using AppleScript to interact with current page
-        setTimeout(async () => {
-          try {
-                      console.log('[BrowserOS Agent] Starting general page automation...');
-          
-          // Example: Take screenshot and analyze what's on screen
-          // Removed unused screenshotScript variable
-          
-          console.log('[BrowserOS Agent] Analyzing current page for automation opportunities...');
-            
-            // In a real BrowserOS implementation, this would:
-            // 1. Take screenshot of current page
-            // 2. Use AI vision to understand what's on screen
-            // 3. Plan and execute actions (clicking, typing, scrolling)
-            // 4. Provide feedback on progress
-            
-          } catch (error) {
-            console.error('[BrowserOS Agent] General automation error:', error);
-          }
-        }, 1000);
-        
-        return { success: true, message: 'Analyzing current page and planning automation...' };
-      }
-      
-          return { success: false, message: 'Unknown command' };
-    
-  } catch (error) {
-    console.error('[BrowserAutomation] Error executing complex command:', error);
-    return { success: false, message: `Error: ${error}` };
-  }
-}
-*/
-
-  ipcMain.on("browser-command", async (_event, command: string) => {
-    try {
-      console.log('[MainHandlers] Received browser command:', command);
-      
-      // Send immediate feedback to UI
-      mainWindow?.webContents.send('browser-command-result', {
-        success: true,
-        message: 'Processing command...'
-      });
-      
-      // First, check if user is asking to open a specific browser
-      const commandLower = command.toLowerCase();
-      const browserMap = {
-        'chrome': 'Google Chrome',
-        'google chrome': 'Google Chrome', 
-        'safari': 'Safari',
-        'firefox': 'Firefox',
-        'edge': 'Microsoft Edge',
-        'microsoft edge': 'Microsoft Edge',
-        'brave': 'Brave Browser',
-        'brave browser': 'Brave Browser',
-        'arc': 'Arc'
-      };
-      
-      let requestedBrowser = null;
-      if (commandLower.includes('open ')) {
-        for (const [key, fullName] of Object.entries(browserMap)) {
-          if (commandLower.includes(`open ${key}`)) {
-            requestedBrowser = fullName;
-            break;
-          }
-        }
-      }
-      
-      // Get active browser
-      let activeBrowser = await browserDetection.getActiveBrowser();
-      
-      // If user requested a specific browser, try to open it
-      if (requestedBrowser) {
-        try {
-          // First, activate the requested browser
-          await execPromise(`osascript -e 'tell application "${requestedBrowser}" to activate'`);
-          
-          // Then, try to create a new window if needed (simple approach)
-          try {
-            await execPromise(`osascript -e 'tell application "${requestedBrowser}" to make new window'`);
-          } catch (windowError) {
-            // If window creation fails, the browser is still activated - that's fine
-            console.log(`[MainHandlers] New window creation not needed/failed for ${requestedBrowser}, browser is activated`);
-          }
-          console.log(`[MainHandlers] Successfully activated and brought ${requestedBrowser} to foreground`);
-          
-          // Wait for browser to fully open and become active
-          await new Promise(resolve => setTimeout(resolve, 2000));
-          
-          // Update active browser
-          activeBrowser = await browserDetection.getActiveBrowser();
-          
-          mainWindow?.webContents.send('browser-command-result', {
-            success: true,
-            message: `Opened ${requestedBrowser}, executing command...`
-          });
-          // Continue to execute the original command instead of returning
-        } catch (error) {
-          mainWindow?.webContents.send('browser-command-result', {
-            success: false,
-            message: `Could not open ${requestedBrowser}. Please make sure it's installed.`
-          });
-          return;
-        }
-      }
-      
-      // If no specific browser requested and no browser is active, open default
-      if (!activeBrowser) {
-        console.log('[MainHandlers] No browser detected, opening default browser...');
-        
-        // Try to open browsers in order of preference (Chrome first as default)
-        const browsersToTry = [
-          'Google Chrome',  // DEFAULT: Always try Chrome first unless user specifies otherwise
-          'Safari', 
-          'Firefox',
-          'Microsoft Edge',
-          'Brave Browser',
-          'Arc'
-        ];
-        
-        let browserOpened = false;
-        for (const browserName of browsersToTry) {
-          try {
-            // First, activate the browser
-            await execPromise(`osascript -e 'tell application "${browserName}" to activate'`);
-            
-            // Then, try to create a new window if needed (simple approach)
-            try {
-              await execPromise(`osascript -e 'tell application "${browserName}" to make new window'`);
-            } catch (windowError) {
-              // If window creation fails, the browser is still activated - that's fine
-              console.log(`[MainHandlers] New window creation not needed/failed for ${browserName}, browser is activated`);
-            }
-            console.log(`[MainHandlers] Successfully activated and brought ${browserName} to foreground`);
-            browserOpened = true;
-            
-            // Wait for browser to fully open and become active
-            await new Promise(resolve => setTimeout(resolve, 2000));
-            
-            // Check if browser is now active
-            activeBrowser = await browserDetection.getActiveBrowser();
-            if (activeBrowser) {
-              mainWindow?.webContents.send('browser-command-result', {
-                success: true,
-                message: `Opened ${browserName}, executing command...`
-              });
-              break;
-            }
-          } catch (error) {
-            console.log(`[MainHandlers] ${browserName} not available, trying next...`);
-            continue;
-          }
-        }
-        
-        if (!browserOpened || !activeBrowser) {
-          mainWindow?.webContents.send('browser-command-result', {
-            success: false,
-            message: 'Could not open any browser. Please install Chrome, Safari, or another supported browser.'
-          });
-          return;
-        }
-      }
-      
-      // Use simple browser commands
-      console.log('[MainHandlers] Processing browser command');
-      
-             // Fallback: Parse and execute simple browser commands
-       const lowerCommand = command.toLowerCase();
-       let result = { success: false, message: 'Unknown command' };
-       
-       // Execute simple commands as fallback
-       {
-        if (lowerCommand.includes('search for') || lowerCommand.includes('google')) {
-          // Extract search query
-          const searchQuery = command.replace(/search for|google/gi, '').trim();
-          const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(searchQuery)}`;
-          
-          // Open search in browser
-          await execPromise(`osascript -e 'tell application "${activeBrowser.name}" to open location "${searchUrl}"'`);
-          result = { success: true, message: `Searching for: ${searchQuery}` };
-          
-        } else if (lowerCommand.includes('new tab')) {
-          await browserDetection.executeInBrowser(activeBrowser.name, 'new-tab');
-          result = { success: true, message: 'Opened new tab' };
-          
-        } else if (lowerCommand.includes('refresh') || lowerCommand.includes('reload')) {
-          await browserDetection.executeInBrowser(activeBrowser.name, 'refresh');
-          result = { success: true, message: 'Page refreshed' };
-          
-        } else if (lowerCommand.includes('back')) {
-          await browserDetection.executeInBrowser(activeBrowser.name, 'back');
-          result = { success: true, message: 'Navigated back' };
-          
-        } else if (lowerCommand.includes('forward')) {
-          await browserDetection.executeInBrowser(activeBrowser.name, 'forward');
-          result = { success: true, message: 'Navigated forward' };
-          
-        } else if (lowerCommand.includes('go to') || lowerCommand.includes('open')) {
-          // Extract URL (only for non-browser apps since browsers are handled above)
-          const urlMatch = command.match(/(?:go to|open)\s+(.+)/i);
-          if (urlMatch) {
-            let url = urlMatch[1].trim();
-            // Add https:// if not present
-            if (!url.startsWith('http://') && !url.startsWith('https://')) {
-              url = 'https://' + url;
-            }
-            await execPromise(`osascript -e 'tell application "${activeBrowser.name}" to open location "${url}"'`);
-            result = { success: true, message: `Navigating to: ${url}` };
-          }
-          
-        } else if (lowerCommand.includes('click')) {
-          // Extract what to click and attempt real clicking automation
-          const clickTarget = command.replace(/click/gi, '').trim();
-          console.log(`[MainHandlers] Attempting to click: ${clickTarget}`);
-          
-          // Real click automation using AppleScript
-          setTimeout(async () => {
-            try {
-              console.log(`[BrowserOS Agent] Searching for clickable element: ${clickTarget}`);
-              
-              // Attempt to find and click elements by various methods
-              const clickScript = `
-                tell application "System Events"
-                  tell process "${activeBrowser.name}"
-                    try
-                      -- Try to find button with text
-                      click (button whose title contains "${clickTarget}" or description contains "${clickTarget}")
-                    on error
-                      try
-                        -- Try to find link with text  
-                        click (UI element whose title contains "${clickTarget}" or description contains "${clickTarget}")
-                      on error
-                        -- Try to find any UI element with the text
-                        click (first UI element whose value contains "${clickTarget}")
-                      end try
-                    end try
-                  end tell
-                end tell
-              `;
-              
-              await execPromise(`osascript -e '${clickScript}'`);
-              console.log(`[BrowserOS Agent] Successfully clicked: ${clickTarget}`);
-              
-            } catch (error) {
-              console.error(`[BrowserOS Agent] Failed to click ${clickTarget}:`, error);
-              console.log('[BrowserOS Agent] You may need to click manually or be more specific');
-            }
-          }, 1000);
-          
-          result = { success: true, message: `Searching for and clicking: ${clickTarget}` };
-          
-        } else if (lowerCommand.includes('type') || lowerCommand.includes('enter') || lowerCommand.includes('fill')) {
-          // Extract what to type
-          const typeMatch = command.match(/(?:type|enter|fill)\s+(.+)/i);
-          if (typeMatch) {
-            const textToType = typeMatch[1].trim();
-            console.log(`[MainHandlers] Typing: ${textToType}`);
-            
-            // Real typing automation
-            setTimeout(async () => {
-              try {
-                const typeScript = `
-                  tell application "System Events"
-                    tell process "${activeBrowser.name}"
-                      keystroke "${textToType}"
-                    end tell
-                  end tell
-                `;
-                
-                await execPromise(`osascript -e '${typeScript}'`);
-                console.log(`[BrowserOS Agent] Typed: ${textToType}`);
-                
-              } catch (error) {
-                console.error('[BrowserOS Agent] Failed to type:', error);
-              }
-            }, 500);
-            
-            result = { success: true, message: `Typing: ${textToType}` };
-          } else {
-            result = { success: false, message: 'Please specify what to type' };
-          }
-          
-        } else {
-          // Try to interpret as a direct URL
-          if (command.includes('.')) {
-            let url = command.trim();
-            if (!url.startsWith('http://') && !url.startsWith('https://')) {
-              url = 'https://' + url;
-            }
-            await execPromise(`osascript -e 'tell application "${activeBrowser.name}" to open location "${url}"'`);
-            result = { success: true, message: `Navigating to: ${url}` };
-          }
-        }
-      }
-      
-      mainWindow?.webContents.send('browser-command-result', result);
-      
+      return;
     } catch (error) {
-      console.error('[MainHandlers] Error executing browser command:', error);
-      mainWindow?.webContents.send('browser-command-result', {
-        success: false,
-        message: 'Failed to execute command: ' + error
+      console.error('[MainHandlers] Main handler error:', error);
+      event.reply('gemini-macos-response', {
+        type: 'conversation',
+        content: 'Error processing request'
       });
     }
   });
-
-  // NEW: Screen Highlighting handlers
-  ipcMain.on("start-screen-highlight", async (_event) => {
-    try {
-      console.log('[MainHandlers] Starting screen highlight mode');
-      const highlightService = getScreenHighlightService();
-      if (highlightService) {
-        await highlightService.startScreenHighlight();
-      } else {
-        console.error('[MainHandlers] Screen highlight service not initialized');
-      }
-    } catch (error) {
-      console.error('[MainHandlers] Error starting screen highlight:', error);
-    }
-  });
-
-  ipcMain.on("cancel-screen-highlight", async (_event) => {
-    try {
-      console.log('[MainHandlers] Canceling screen highlight');
-      const highlightService = getScreenHighlightService();
-      if (highlightService) {
-        highlightService.cleanup();
-      }
-      // Forward cancel event to renderer
-      mainWindow?.webContents.send("screen-highlight-cancelled");
-    } catch (error) {
-      console.error('[MainHandlers] Error canceling screen highlight:', error);
-    }
-  });
-  
-  // Forward cancel event from highlight window to main window
-  ipcMain.on("screen-highlight-cancelled", (_event) => {
-    console.log('[MainHandlers] Forwarding screen-highlight-cancelled to renderer');
-    mainWindow?.webContents.send("screen-highlight-cancelled");
-  });
-
-  ipcMain.on("capture-screen-area-for-prompt", async (_event, selection: { x: number, y: number, width: number, height: number }) => {
-    try {
-      console.log('[MainHandlers] Capturing screen area for prompt:', selection);
-      
-      // Validate selection dimensions
-      if (selection.width < 10 || selection.height < 10) {
-        console.error('[MainHandlers] Selection too small:', selection);
-        return;
-      }
-      
-      // Get display info for debugging
-      const primaryDisplay = screen.getPrimaryDisplay();
-      const { scaleFactor, bounds } = primaryDisplay;
-      
-      console.log('[MainHandlers] Display info - Scale factor:', scaleFactor, 'Bounds:', bounds);
-      console.log('[MainHandlers] Original selection:', selection);
-      
-      // Add Y offset to compensate for menubar/titlebar
-      const menuBarOffset = 37; // macOS menubar height + window chrome
-      const adjustedSelection = {
-        x: selection.x,
-        y: selection.y + menuBarOffset,
-        width: selection.width,
-        height: selection.height
-      };
-      console.log('[MainHandlers] Adjusted coordinates with menubar offset:', adjustedSelection);
-      
-      // Use macOS screencapture to capture just the selected area
-      const tempDir = path.join(app.getPath('temp'), 'opus-highlights');
-      if (!fs.existsSync(tempDir)) {
-        fs.mkdirSync(tempDir, { recursive: true });
-      }
-      
-      const timestamp = Date.now();
-      const capturePath = path.join(tempDir, `capture-${timestamp}.png`);
-      
-      // Use screencapture with -R flag for rectangle selection
-      // Add -x flag to disable shadows and other effects for more accurate capture
-      const captureCommand = `screencapture -x -R${adjustedSelection.x},${adjustedSelection.y},${adjustedSelection.width},${adjustedSelection.height} "${capturePath}"`;
-      console.log('[MainHandlers] Running command:', captureCommand);
-      await execPromise(captureCommand);
-      
-      if (fs.existsSync(capturePath)) {
-        // Convert to base64
-        const imageBuffer = fs.readFileSync(capturePath);
-        const base64Image = imageBuffer.toString('base64');
-        
-        // Clean up temp file
-        fs.unlinkSync(capturePath);
-        
-        // Send the captured image back to renderer for prompt input
-        if (mainWindow) {
-          mainWindow.webContents.send("screen-captured-for-prompt", {
-            imageBase64: base64Image
-          });
-        }
-        
-        console.log('[MainHandlers] Screen area captured, ready for prompt');
-      } else {
-        console.error('[MainHandlers] Failed to capture screen area');
-      }
-      
-    } catch (error) {
-      console.error('[MainHandlers] Error capturing screen area:', error);
-    }
-  });
-
-  // NEW: Resume upload handler
-  ipcMain.on("resume-uploaded", (_event, data: { fileName: string, content: string }) => {
-    console.log('[MainHandlers] Resume uploaded:', data.fileName);
-    // Store resume context for use in live audio sessions
-    console.log('[MainHandlers] Resume context stored for interview assistance');
-  });
-
-  // Perform a web search in the user's default browser for an action item
-  ipcMain.on('perform-search', async (_evt, query: string) => {
-    try {
-      const url = `https://www.google.com/search?q=${encodeURIComponent(query || '')}`;
-      // @ts-ignore
-      const { shell } = await import('electron');
-      shell.openExternal(url);
-    } catch (err) {
-      console.error('[MainHandlers] perform-search error:', err);
-    }
-  });
-
-// Removed: collaborativeScreenshotInterval and isCollaborativeModeActive - no longer needed
-
-// Monitoring functions removed - screenshots now taken on-demand only
-
-  // Visual navigation and dock click functions removed - agent mode disabled
-
-// runAgentInApp function removed - agent mode disabled
-
-async function isAppFrontmost(appName: string): Promise<boolean> {
-  try {
-    const { stdout } = await execPromise(`osascript -e 'tell application "System Events" to name of first process whose frontmost is true'`);
-    return stdout.trim() === appName;
-  } catch {
-    return false;
-  }
-}
-
-async function isAppVisible(appName: string): Promise<boolean> {
-  try {
-    const bundleId = await getBundleId(appName);
-    const { stdout } = await execPromise(`swift swift/windows.swift ${bundleId}`);
-    const arr = JSON.parse(stdout || '[]') as Array<any>;
-    return Array.isArray(arr) && arr.length > 0;
-  } catch {
-    return false;
-  }
-}
-
-async function resolvePreferredBrowser(): Promise<string> {
-  const candidates = ["Google Chrome", "Safari", "Arc", "Firefox", "Microsoft Edge", "Brave Browser"];
-  for (const app of candidates) {
-    try { await getBundleId(app); return app; } catch { continue; }
-  }
-  return "Safari";
-}
-
-function extractTopicFromPrompt(prompt: string): string {
-  const m = prompt.match(/about\s+(.+?)(?:\.|$)/i);
-  return (m ? m[1] : prompt).trim();
-}
-
-async function getActiveBrowserUrl(): Promise<string> {
-  try {
-    const { stdout } = await execPromise(`osascript -e 'tell application "Google Chrome" to return URL of active tab of front window'`);
-    return stdout.trim();
-  } catch {}
-  try {
-    const { stdout } = await execPromise(`osascript -e 'tell application "Safari" to return URL of front document'`);
-    return stdout.trim();
-  } catch {}
-  return '';
-}
-
-async function browserUrlContains(substr: string): Promise<boolean> {
-  try {
-    const url = await getActiveBrowserUrl();
-    return url.toLowerCase().includes(substr.toLowerCase());
-  } catch { return false; }
-}
-
-function buildPlanForTask(prompt: string): PlanStep[] | null {
-  // Simple planner for common task categories
-  if (/\b(presentation|slides|slide deck|deck|ppt|keynote)\b/i.test(prompt)) {
-    const browser = 'Google Chrome';
-    const topic = extractTopicFromPrompt(prompt);
-    return [
-      { id: 1, title: 'Open browser', action: 'open_app', params: { appName: browser }, check: { type: 'app_frontmost', value: browser } },
-      { id: 2, title: 'Navigate to Google Slides', action: 'navigate_url', params: { url: 'https://slides.google.com' }, check: { type: 'url_contains', value: 'slides.google.com' } },
-      { id: 3, title: `Create presentation about "${topic}"`, action: 'agent', params: { appName: browser, prompt: `On Google Slides, create a new blank presentation titled "${topic}" and add initial slides.` } }
-    ];
-  }
-  return null;
-}
-
-async function executePlan(
-  plan: PlanStep[],
-  event: any,
-  _history: any[],
-  _isAgentMode: boolean
-) {
-  // Virtual cursor functionality removed
-  for (const step of plan) {
-    console.log(`[Plan] Executing step ${step.id}: ${step.title}`);
-    if (step.check?.type === 'app_frontmost') {
-      if (await isAppFrontmost(step.check.value)) { console.log(`[Plan] Step ${step.id} skipped - already frontmost`); continue; }
-    }
-    if (step.check?.type === 'url_contains') {
-      if (await browserUrlContains(step.check.value)) { console.log(`[Plan] Step ${step.id} skipped - URL already present`); continue; }
-    }
-    if (step.action === 'open_app') {
-      let appName = (step.params?.appName as string) || 'Safari';
-      if (appName === 'Google Chrome') { appName = await resolvePreferredBrowser(); }
-      await performAction(`=OpenApp\n${appName}`, "com.apple.desktop", [], event);
-      let ok = false; for (let i = 0; i < 6; i++) { if (await isAppFrontmost(appName) || await isAppVisible(appName)) { ok = true; break; } await new Promise(r => setTimeout(r, 300)); }
-      console.log(`[Plan] Step ${step.id} ${ok ? 'completed' : 'pending'}`);
-    } else if (step.action === 'navigate_url') {
-      const url = step.params?.url as string;
-      const browser = (await isAppFrontmost('Google Chrome')) ? 'Google Chrome' : (await isAppFrontmost('Safari') ? 'Safari' : await resolvePreferredBrowser());
-      try { await performAction('=Key\n^cmd+l', browser, [], event); await performAction(`=Key\n${url} ^enter`, browser, [], event); } catch {}
-      let ok = false; for (let i = 0; i < 8; i++) { if (await browserUrlContains(step.check?.value || '')) { ok = true; break; } await new Promise(r => setTimeout(r, 400)); }
-      console.log(`[Plan] Step ${step.id} ${ok ? 'completed' : 'pending'}`);
-    } else if (step.action === 'agent') {
-      console.log(`[Plan] Step ${step.id} skipped - agent functionality disabled`);
-    }
-  }
-  }
 
   // Handle pending agent task retrieval
   ipcMain.handle("get-pending-agent-task", async () => {
@@ -3189,5 +2226,551 @@ async function executePlan(
   // Handle pending agent task clearing
   ipcMain.on("clear-pending-agent-task", async () => {
     delete process.env.PENDING_AGENT_TASK;
+  });
+
+  // Meeting document upload handler
+  ipcMain.on('meeting-document-uploaded', (_event, document) => {
+    console.log('[MainHandlers] 📄 Meeting document uploaded:', document.name);
+    
+    // Store document globally for meeting context
+    if (!(global as any).meetingDocuments) {
+      (global as any).meetingDocuments = [];
+    }
+    
+    (global as any).meetingDocuments.push({
+      name: document.name,
+      content: document.content,
+      type: document.type,
+      uploadedAt: document.uploadedAt
+    });
+    
+    console.log('[MainHandlers] 📄 Total meeting documents:', (global as any).meetingDocuments.length);
+  });
+
+  // Handle image uploads from Ask/Agent modes
+  ipcMain.on('images-uploaded', (event, data) => {
+    console.log('[MainHandlers] 📷 Images uploaded:', data.images?.length || 0);
+    // Store images for the current session - they'll be included with the next message
+    (event.sender as any).uploadedImages = data.images || [];
+  });
+
+  // Generate personalized completion message
+  ipcMain.on("generate-completion-message", async (event, originalTask: string) => {
+    try {
+      console.log('[MainHandlers] Generating completion message for task:', originalTask);
+      
+      const prompt = `The user asked an AI agent to: "${originalTask}"
+
+The task has been completed successfully! Generate a short, fun, enthusiastic completion message (max 10 words) that:
+- Shows excitement about the completed task
+- Is personalized to what they actually did
+- Has personality and happiness
+- Uses casual, friendly language
+
+Examples:
+- For posting: "Done! Hope it goes viral! 🚀"
+- For deleting messages: "Done! All cleaned up! ✨"
+- For shopping: "Done! Happy shopping! 🛍️"
+- For sending emails: "Done! Message sent perfectly! 📧"
+
+Just return the completion message, nothing else.`;
+
+      // Use Gemini 2.0 Flash for completion message
+      const { GoogleGenerativeAI } = await import('@google/generative-ai');
+      const apiKey = process.env.GEMINI_API_KEY;
+      if (!apiKey) {
+        throw new Error('GEMINI_API_KEY not found');
+      }
+      
+      const genAI = new GoogleGenerativeAI(apiKey);
+      const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash-exp' });
+
+      const result = await model.generateContent({
+        contents: [{
+          role: 'user',
+          parts: [{ text: prompt }]
+        }],
+        generationConfig: {
+          temperature: 0.9,
+          maxOutputTokens: 50,
+        }
+      });
+
+      const response = await result.response;
+      const message = response.text()?.trim() || 'Done! ✨';
+      
+      console.log('[MainHandlers] Generated completion message:', message);
+      event.reply('completion-message-response', { 
+        type: 'completion_message', 
+        message: message 
+      });
+
+    } catch (error) {
+      console.error('[MainHandlers] Failed to generate completion message:', error);
+      event.reply('completion-message-response', { 
+        type: 'completion_message', 
+        message: 'Done! ✨' 
+      });
+    }
+  });
+
+  // Store reference to current agent for termination
+  let currentAgent: any = null;
+
+  // Terminate agent immediately
+  ipcMain.on("terminate-agent", async (event) => {
+    try {
+      console.log('[MainHandlers] Agent termination requested by user');
+      
+      // Stop any running automation
+      if (currentAgent) {
+        console.log('[MainHandlers] Stopping TerminatorAgent...');
+        currentAgent.stop();
+        currentAgent = null;
+      }
+      
+      // Send immediate termination response
+      event.reply('gemini-macos-response', {
+        type: 'terminated',
+        content: 'Agent stopped by user'
+      });
+      
+      console.log('[MainHandlers] Agent terminated successfully');
+    } catch (error) {
+      console.error('[MainHandlers] Error terminating agent:', error);
+    }
+  });
+
+  // Process sendMessage requests (ask mode)
+  ipcMain.on("sendMessage", async (event, message: string, options: any = {}) => {
+    console.log('[MainHandlers] Received sendMessage:', message, 'Options:', options);
+    
+    const senderId = event.sender.id;
+    // const sessionId = `session-${senderId}-${Date.now()}`; // Unused
+    
+    // Neatly identity intercept: if user asks who you are, always answer consistently
+    const lowered = (message || '').trim().toLowerCase();
+    if (lowered === 'who are you' || lowered === 'who are you?' || lowered === 'what are you' || lowered === 'what are you?' || lowered.includes('who are you') || lowered.includes('what are you') || lowered.includes('your name')) {
+      const identity = 'I am Neatly, your on-device assistant.';
+      appendToHistory(senderId, 'assistant', identity);
+      event.reply('ask-response', identity);
+      return;
+    }
+
+    // Get any uploaded images for this sender
+    const uploadedImages = (event.sender as any).uploadedImages || [];
+    if (uploadedImages.length > 0) {
+      console.log('[MainHandlers] Including', uploadedImages.length, 'uploaded images');
+      // Clear images after use
+      (event.sender as any).uploadedImages = [];
+    }
+    
+    // Append to history for this sender
+    appendToHistory(senderId, 'user', message);
+    
+    if (options.mode === "chat") {
+      try {
+        let screenshot = null;
+        
+        // Take screenshot for screen analysis if no images provided
+        if (uploadedImages.length === 0) {
+          console.log('[MainHandlers] Taking screenshot for ask mode...');
+          const primaryDisplay = screen.getPrimaryDisplay();
+          screenshot = await win?.webContents.capturePage({
+            x: 0,
+            y: 0,
+            width: primaryDisplay.bounds.width,
+            height: primaryDisplay.bounds.height
+          });
+          console.log('[MainHandlers] Screenshot captured successfully');
+        }
+        
+        let imageData = '';
+        if (screenshot) {
+          imageData = screenshot.toDataURL();
+          console.log('[MainHandlers] Screenshot converted to data URL, length:', imageData.length);
+        } else if (uploadedImages.length > 0) {
+          // Use first uploaded image for analysis
+          imageData = uploadedImages[0].data;
+          console.log('[MainHandlers] Using uploaded image, length:', imageData.length);
+        }
+        
+        // Build prompt for image analysis, branded for Neatly
+        const prompt = uploadedImages.length > 0 
+          ? `You are Neatly, an on-device assistant. The user uploaded ${uploadedImages.length} image(s) and asks: "${message}". Analyze the image(s) and provide a helpful, concise response.`
+          : `You are Neatly, an on-device assistant. The user is asking about what's visible on their screen: "${message}". Analyze the screenshot and provide a helpful response based on what you can see.`;
+        
+        console.log('[MainHandlers] Sending to Gemini Vision for analysis...');
+        const response = await geminiVision.analyzeImageWithPrompt(imageData, prompt);
+        console.log('[MainHandlers] Gemini Vision response received:', response ? 'Success' : 'Empty');
+        
+        if (response) {
+          event.reply('ask-response', response);
+          appendToHistory(senderId, 'assistant', response);
+          console.log('[MainHandlers] Ask response sent to renderer');
+        } else {
+          console.warn('[MainHandlers] Empty response from Gemini Vision');
+          event.reply('ask-response', 'I was able to analyze your screen but couldn\'t generate a response. Please try asking again.');
+        }
+      } catch (error) {
+        console.error('[MainHandlers] Vision analysis failed:', error);
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        const errorStack = error instanceof Error ? error.stack : 'No stack trace';
+        console.error('[MainHandlers] Error details:', errorMessage);
+        console.error('[MainHandlers] Error stack:', errorStack);
+        event.reply('ask-response', `Sorry, I encountered an error analyzing the image: ${errorMessage}`);
+      }
+    } else {
+      // Handle other modes...
+    }
+  });
+
+  // Select mode (screen highlight) IPC
+  ipcMain.removeAllListeners("start-screen-highlight"); // Remove any existing listeners
+  ipcMain.on("start-screen-highlight", async (_event) => {
+    try {
+      console.log('[MainHandlers] Starting screen highlight - aggressive cleanup first');
+      
+      // Close ALL windows that might be highlight overlays
+      const allWindows = BrowserWindow.getAllWindows();
+      allWindows.forEach(window => {
+        if (!window.isDestroyed()) {
+          const title = window.getTitle();
+          if (title === 'Screen Highlight' || title === '' || window.isAlwaysOnTop()) {
+            // Check if it's likely an overlay (transparent, always on top, etc.)
+            if (window !== win) { // Don't close the main window
+              console.log('[MainHandlers] Force closing potential overlay window:', title);
+              window.close();
+            }
+          }
+        }
+      });
+      
+      const { getScreenHighlightService } = await import("./services/ScreenHighlightService");
+      const highlightService = getScreenHighlightService();
+      if (highlightService) {
+        // Force cleanup any existing overlay before starting new one
+        console.log('[MainHandlers] Cleaning up existing overlay service');
+        highlightService.cleanup();
+        
+        // Longer delay to ensure cleanup completes
+        await new Promise(resolve => setTimeout(resolve, 300));
+        
+        await highlightService.startScreenHighlight();
+      } else {
+        console.error('[MainHandlers] start-screen-highlight requested but service not initialized');
+      }
+    } catch (err) {
+      console.error('[MainHandlers] Failed to start screen highlight:', err);
+    }
+  });
+
+  ipcMain.on("cancel-screen-highlight", async (_event) => {
+    try {
+      const { getScreenHighlightService } = await import("./services/ScreenHighlightService");
+      const highlightService = getScreenHighlightService();
+      if ((highlightService as any)?.cleanup) {
+        (highlightService as any).cleanup();
+      }
+      if (win && !win.isDestroyed()) {
+        win.webContents.send('screen-highlight-cancelled');
+      }
+    } catch (err) {
+      console.error('[MainHandlers] Failed to cancel screen highlight:', err);
+    }
+  });
+
+  // Relay from overlay back to renderer when ESC or UI cancels selection
+  ipcMain.on("screen-highlight-cancelled", async (_event) => {
+    console.log('[MainHandlers] Forwarding screen-highlight-cancelled to renderer');
+    if (win && !win.isDestroyed()) {
+      win.webContents.send('screen-highlight-cancelled');
+    }
+    
+    // Clean up the screen highlight service on cancel
+    const { getScreenHighlightService } = await import("./services/ScreenHighlightService");
+    const highlightService = getScreenHighlightService();
+    if (highlightService) {
+      highlightService.cleanup();
+    }
+  });
+
+  // Overlay requests area capture; we take a fresh screen capture of the primary display and crop it
+  ipcMain.on("capture-screen-area-for-prompt", async (_event, selection: { x: number; y: number; width: number; height: number }) => {
+    try {
+      console.log('[MainHandlers] Capturing screen area:', selection);
+      
+      // Get actual screen dimensions
+      const primaryDisplay = screen.getPrimaryDisplay();
+      const { width: actualScreenWidth, height: actualScreenHeight } = primaryDisplay.bounds;
+      const scaleFactor = primaryDisplay.scaleFactor;
+      
+      // Account for menu bar height on macOS + additional offset for accuracy  
+      const menuBarHeight = -40; // NEGATIVE offset - screenshot was too high, so we need to go DOWN
+      
+      console.log('[MainHandlers] Screen info:', { 
+        actualScreenWidth, 
+        actualScreenHeight, 
+        scaleFactor,
+        menuBarHeight
+      });
+      
+      // Capture primary screen thumbnail via desktopCapturer
+      const sources = await desktopCapturer.getSources({ 
+        types: ['screen'], 
+        thumbnailSize: { 
+          width: actualScreenWidth * scaleFactor, 
+          height: actualScreenHeight * scaleFactor 
+        }, 
+        fetchWindowIcons: false 
+      });
+      const primary = sources[0];
+      if (!primary || primary.thumbnail.isEmpty()) {
+        throw new Error('No screen source available');
+      }
+      const image = primary.thumbnail;
+      const capturedWidth = image.getSize().width;
+      const capturedHeight = image.getSize().height;
+      
+      console.log('[MainHandlers] Captured image size:', { capturedWidth, capturedHeight });
+
+      // Calculate scaling ratios
+      const scaleX = capturedWidth / actualScreenWidth;
+      const scaleY = capturedHeight / actualScreenHeight;
+      
+      console.log('[MainHandlers] Scale ratios:', { scaleX, scaleY });
+
+      // Scale selection coordinates to match captured image
+      // Adjust Y coordinate to account for menu bar
+      const adjustedY = selection.y - menuBarHeight;
+      
+      const scaledX = selection.x * scaleX;
+      const scaledY = Math.max(0, adjustedY * scaleY); // Ensure Y is not negative
+      const scaledWidth = selection.width * scaleX;
+      const scaledHeight = selection.height * scaleY;
+      
+      console.log('[MainHandlers] Scaled selection:', { 
+        originalY: selection.y,
+        adjustedY,
+        scaledX, scaledY, scaledWidth, scaledHeight 
+      });
+
+      // Clamp selection to image bounds
+      const sx = Math.max(0, Math.min(scaledX, capturedWidth - 1));
+      const sy = Math.max(0, Math.min(scaledY, capturedHeight - 1));
+      const sw = Math.max(1, Math.min(scaledWidth, capturedWidth - sx));
+      const sh = Math.max(1, Math.min(scaledHeight, capturedHeight - sy));
+      
+      console.log('[MainHandlers] Final crop area:', { sx, sy, sw, sh });
+
+      const cropped = image.crop({ x: Math.floor(sx), y: Math.floor(sy), width: Math.floor(sw), height: Math.floor(sh) });
+      const imageBase64 = cropped.toPNG().toString('base64');
+
+      if (win && !win.isDestroyed()) {
+        win.webContents.send('screen-captured-for-prompt', { imageBase64 });
+      }
+      
+      // Clean up the screen highlight service after capture
+      const { getScreenHighlightService } = await import("./services/ScreenHighlightService");
+      const highlightService = getScreenHighlightService();
+      if (highlightService) {
+        highlightService.cleanup();
+      }
+    } catch (err) {
+      console.error('[MainHandlers] Failed to capture screen area:', err);
+      
+      // Also cleanup on error
+      const { getScreenHighlightService } = await import("./services/ScreenHighlightService");
+      const highlightService = getScreenHighlightService();
+      if (highlightService) {
+        highlightService.cleanup();
+      }
+    }
+  });
+
+  let recordingIntervals = new Map<number, NodeJS.Timeout>();
+  let recordingBuffers = new Map<number, string[]>();
+
+  // Screen recording: start capturing screenshots every ~200ms
+  ipcMain.on('recording:start', async (event) => {
+    try {
+      const senderId = event.sender.id;
+      // Reset any previous session
+      if (recordingIntervals.has(senderId)) {
+        clearInterval(recordingIntervals.get(senderId)!);
+        recordingIntervals.delete(senderId);
+      }
+      recordingBuffers.set(senderId, []);
+
+      const captureOnce = async () => {
+        try {
+          const primaryDisplay = screen.getPrimaryDisplay();
+          const { width: sw, height: sh } = primaryDisplay.bounds;
+          const scaleFactor = primaryDisplay.scaleFactor;
+          const sources = await desktopCapturer.getSources({
+            types: ['screen'],
+            fetchWindowIcons: false,
+            thumbnailSize: { width: Math.max(1, Math.floor(sw * scaleFactor)), height: Math.max(1, Math.floor(sh * scaleFactor)) }
+          });
+          const primary = sources[0];
+          if (!primary || primary.thumbnail.isEmpty()) return;
+          const base64 = primary.thumbnail.toPNG().toString('base64');
+          const arr = recordingBuffers.get(senderId);
+          if (arr) {
+            arr.push(base64);
+            // Optional: bound memory (e.g., keep last N)
+            if (arr.length > 2000) arr.shift();
+          }
+          // Progress update to renderer (count only)
+          if (win && !win.isDestroyed()) {
+            win.webContents.send('recording:progress', { count: recordingBuffers.get(senderId)?.length || 0 });
+          }
+        } catch (e) {
+          // swallow individual capture errors
+        }
+      };
+
+      // Prime first capture immediately to align with 200ms cadence
+      await captureOnce();
+      const interval = setInterval(captureOnce, 200);
+      recordingIntervals.set(senderId, interval);
+      if (win && !win.isDestroyed()) {
+        win.webContents.send('recording:started');
+      }
+    } catch (err) {
+      console.error('[MainHandlers] Failed to start recording:', err);
+      if (win && !win.isDestroyed()) {
+        win.webContents.send('recording:error', String(err));
+      }
+    }
+  });
+
+  // Stop recording and return images (kept in memory until analyze or reset)
+  ipcMain.on('recording:stop', (event) => {
+    const senderId = event.sender.id;
+    if (recordingIntervals.has(senderId)) {
+      clearInterval(recordingIntervals.get(senderId)!);
+      recordingIntervals.delete(senderId);
+    }
+    const images = recordingBuffers.get(senderId) || [];
+    if (win && !win.isDestroyed()) {
+      win.webContents.send('recording:stopped', { count: images.length });
+    }
+  });
+
+  // Analyze recorded images with a user prompt and then clear buffer for this sender
+  ipcMain.on('recording:analyze', async (event, userPrompt: string) => {
+    const senderId = event.sender.id;
+    try {
+      const images = recordingBuffers.get(senderId) || [];
+      if (images.length === 0) {
+        event.reply('ask-response', 'No screenshots were recorded. Try recording again.');
+        return;
+      }
+
+      // Identity intercept for recording flow as well
+      const loweredPrompt = (userPrompt || '').trim().toLowerCase();
+      if (loweredPrompt.includes('who are you') || loweredPrompt.includes('what are you') || loweredPrompt.includes('your name')) {
+        const identity = 'I am Neatly, your on-device assistant.';
+        appendToHistory(senderId, 'assistant', identity);
+        event.reply('ask-response', identity);
+        recordingBuffers.delete(senderId);
+        return;
+      }
+
+      // Append to per-sender chat history
+      appendToHistory(senderId, 'user', userPrompt);
+
+      // Send to Vision multi-image analyzer with video context, branded for Neatly
+      const videoPrompt = `You are Neatly, an on-device assistant. You are analyzing ${images.length} sequential screenshots captured from a screen recording (like frames from a video). When the user asks "what do you see?" or "what did I do?", they mean throughout the ENTIRE recording - analyze ALL ${images.length} frames equally, not just the most recent ones.
+
+User's question: "${userPrompt}"
+
+IMPORTANT: Analyze the COMPLETE sequence from start to finish. When answering questions like "what did I do on my computer?", describe activities throughout the entire recording duration, not just what's visible in the final frames. Look at all frames to understand the full timeline of actions and activities.
+
+Provide a concise, helpful answer as Neatly that covers the entire recording period.`;
+      
+      const response = await geminiVision.analyzeImagesWithPrompt(images, videoPrompt);
+      appendToHistory(senderId, 'assistant', response);
+
+      // Reply back to renderer using existing ask-response channel to show in chat
+      event.reply('ask-response', response);
+
+      // Clear buffer after analysis to release memory
+      recordingBuffers.delete(senderId);
+    } catch (err) {
+      console.error('[MainHandlers] recording:analyze failed:', err);
+      const msg = err instanceof Error ? err.message : String(err);
+      event.reply('ask-response', `Sorry, I couldn't analyze the recording: ${msg}`);
+    }
+  });
+
+  // Clipboard IPC
+  ipcMain.handle('clipboard-write', async (_event, payload: { text?: string; html?: string; imageBase64?: string }) => {
+    const { ClipboardService } = await import('./services/ClipboardService');
+    return ClipboardService.write(payload || {});
+  });
+
+  ipcMain.handle('clipboard-read-text', async () => {
+    const { ClipboardService } = await import('./services/ClipboardService');
+    return ClipboardService.readText();
+  });
+
+  ipcMain.handle('clipboard-read-html', async () => {
+    const { ClipboardService } = await import('./services/ClipboardService');
+    return ClipboardService.readHTML();
+  });
+
+  ipcMain.handle('clipboard-read-image-base64', async () => {
+    const { ClipboardService } = await import('./services/ClipboardService');
+    return ClipboardService.readImageBase64();
+  });
+
+  // Copy screenshot area directly to clipboard
+  ipcMain.on('copy-screen-area-to-clipboard', async (_event, selection: { x: number; y: number; width: number; height: number }) => {
+    try {
+      const primaryDisplay = screen.getPrimaryDisplay();
+      const captured = await win?.webContents.capturePage({
+        x: 0,
+        y: 0,
+        width: primaryDisplay.bounds.width,
+        height: primaryDisplay.bounds.height,
+      });
+      if (!captured) return;
+
+      const image = nativeImage.createFromDataURL(captured.toDataURL());
+      const imageSize = image.getSize();
+      const scaleX = imageSize.width / primaryDisplay.size.width;
+      const scaleY = imageSize.height / primaryDisplay.size.height;
+
+      // Adjust for menu bar on macOS
+      const menuBarHeight = process.platform === 'darwin' ? screen.getPrimaryDisplay().bounds.y * -1 : 0;
+      const adjustedY = selection.y - menuBarHeight;
+
+      const sx = Math.max(0, Math.min(Math.floor(selection.x * scaleX), imageSize.width - 1));
+      const sy = Math.max(0, Math.min(Math.floor(Math.max(0, adjustedY) * scaleY), imageSize.height - 1));
+      const sw = Math.max(1, Math.min(Math.floor(selection.width * scaleX), imageSize.width - sx));
+      const sh = Math.max(1, Math.min(Math.floor(selection.height * scaleY), imageSize.height - sy));
+
+      const cropped = image.crop({ x: sx, y: sy, width: sw, height: sh });
+      const { ClipboardService } = await import('./services/ClipboardService');
+      ClipboardService.write({ imageBase64: cropped.toPNG().toString('base64') });
+      if (win && !win.isDestroyed()) win.webContents.send('copied-screen-area-to-clipboard');
+
+      const { getScreenHighlightService } = await import('./services/ScreenHighlightService');
+      const highlightService = getScreenHighlightService();
+      if (highlightService) highlightService.cleanup();
+    } catch (err) {
+      console.error('[MainHandlers] Failed to copy screen area to clipboard:', err);
+    }
+  });
+
+  // Paste image from clipboard into the focused app by simulating Cmd+V via System Events
+  ipcMain.on('paste-image-from-clipboard', async () => {
+    try {
+      await execPromise(`osascript -e 'tell application "System Events" to keystroke "v" using {command down}'`);
+    } catch (err) {
+      console.error('[MainHandlers] Failed to paste image via keystroke:', err);
+    }
   });
 }

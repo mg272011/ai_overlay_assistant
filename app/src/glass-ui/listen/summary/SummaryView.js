@@ -19,6 +19,7 @@ export class SummaryView extends LitElement {
       max-height: 420px; /* Reduced max height */
       flex: 1;
       height: auto; /* Let it adapt to content */
+      pointer-events: auto; /* Make actions area interactive */
     }
 
     .insights-container::-webkit-scrollbar {
@@ -72,6 +73,10 @@ export class SummaryView extends LitElement {
       padding-left: 20px;
       list-style: disc;
       color: rgba(255, 255, 255, 0.85);
+      display: -webkit-box;
+      -webkit-line-clamp: 4;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
     }
 
     .summary-list li {
@@ -183,6 +188,9 @@ export class SummaryView extends LitElement {
     this.hljs = hljs;
     this.DOMPurify = createDOMPurify(window);
     this.isLibrariesLoaded = true;
+    
+    console.log('[SummaryView] 🏗️ Constructor - SummaryView initialized');
+    console.log('[SummaryView] 🏗️ Initial contextualActions:', this.contextualActions);
   }
 
   connectedCallback() {
@@ -196,15 +204,28 @@ export class SummaryView extends LitElement {
     // Listen for contextual actions/suggestions from main process
     if (window.api?.summaryView?.onContextualSearch) {
       window.api.summaryView.onContextualSearch((_evt, items) => {
+        console.log('[SummaryView] 🔍 ===== RECEIVED CONTEXTUAL SEARCH =====');
+        console.log('[SummaryView] 🔍 Raw items received:', JSON.stringify(items, null, 2));
+        console.log('[SummaryView] 🔍 Items is array:', Array.isArray(items));
+        console.log('[SummaryView] 🔍 Items length:', items?.length);
         this.contextualActions = Array.isArray(items) ? items : [];
+        console.log('[SummaryView] 🔍 Set contextualActions to:', this.contextualActions);
         this.requestUpdate();
+        console.log('[SummaryView] 🔍 Requested update - contextual actions should render');
       });
+    } else {
+      console.error('[SummaryView] ❌ window.api.summaryView.onContextualSearch not available');
     }
     if (window.api?.summaryView?.onContextualSuggestions) {
       window.api.summaryView.onContextualSuggestions((_evt, items) => {
+        console.log('[SummaryView] 💬 ===== RECEIVED CONTEXTUAL SUGGESTIONS =====');
+        console.log('[SummaryView] 💬 Raw items received:', JSON.stringify(items, null, 2));
         this.contextualSuggestions = Array.isArray(items) ? items : [];
+        console.log('[SummaryView] 💬 Set contextualSuggestions to:', this.contextualSuggestions);
         this.requestUpdate();
       });
+    } else {
+      console.error('[SummaryView] ❌ window.api.summaryView.onContextualSuggestions not available');
     }
   }
 
@@ -246,7 +267,17 @@ export class SummaryView extends LitElement {
   }
 
   handleSayNextClick() {
-    this.dispatchEvent(new CustomEvent('meeting-action-clicked', { detail: { type: 'say-next', text: 'What should I say next?' }, bubbles: true, composed: true }));
+    console.log('[SummaryView] 🔥 SAY NEXT CLICKED - handleSayNextClick called');
+    console.log('[SummaryView] 🔥 About to dispatch meeting-action-clicked event');
+    const event = new CustomEvent('meeting-action-clicked', { 
+      detail: { type: 'say-next', text: 'What should I say next?' }, 
+      bubbles: true, 
+      composed: true 
+    });
+    console.log('[SummaryView] 🔥 Event created:', event);
+    console.log('[SummaryView] 🔥 Event detail:', event.detail);
+    this.dispatchEvent(event);
+    console.log('[SummaryView] 🔥 Event dispatched successfully');
   }
 
   renderMarkdownContent() {
@@ -284,6 +315,11 @@ export class SummaryView extends LitElement {
 
   render() {
     if (!this.isVisible) return html`<div style="display:none"></div>`;
+    
+    // Debug contextual actions rendering
+    console.log('[SummaryView] 🎨 RENDER - contextualActions length:', this.contextualActions.length);
+    console.log('[SummaryView] 🎨 RENDER - contextualActions content:', this.contextualActions);
+    
     const data = this.structuredData || { summary: [], topic: { header: '', bullets: [] }, actions: [], followUps: [] };
     const hasSummary = Array.isArray(data.summary) && data.summary.length;
     const hasTopic = !!data.topic?.header || (Array.isArray(data.topic?.bullets) && data.topic.bullets.length);
@@ -298,11 +334,14 @@ export class SummaryView extends LitElement {
     const emitAction = (payload) => () => this.handleActionClick(payload);
 
     return html`
-      <div class="insights-container">
+      <div class="insights-container"
+        @mouseenter=${() => { try { window.ipcRenderer?.send('mouse:enter-interactive'); } catch {} }}
+        @mouseleave=${() => { try { window.ipcRenderer?.send('mouse:leave-interactive'); } catch {} }}
+      >
         ${hasSummary ? html`
           <insights-title style="margin-top:6px;">Summary</insights-title>
           <ul class="summary-list">
-            ${data.summary.slice(0, 5).map((bullet) => html`<li class="request-item">${bullet}</li>`)}
+            ${data.summary.slice(0, 4).map((bullet) => html`<li class="request-item">${bullet}</li>`)}
           </ul>
         ` : ''}
 
@@ -316,23 +355,19 @@ export class SummaryView extends LitElement {
         ` : ''}
 
         <insights-title style="margin-top:6px;">Actions</insights-title>
-        ${hasSummary || hasTopic ? html`
+        ${/* Only show "What should I say next?" after first analysis is complete */ (hasSummary || hasTopic || (Array.isArray(this.contextualActions) && this.contextualActions.length)) ? html`
           <div class="outline-item clickable" @click=${() => this.handleSayNextClick()}>
             <span>💬</span>
             <span style="margin-left:6px;">What should I say next?</span>
           </div>
         ` : ''}
-        ${Array.isArray(this.contextualActions) && this.contextualActions.length ? this.contextualActions.map((action) => html`
+        ${Array.isArray(this.contextualActions) && this.contextualActions.length ? this.contextualActions.slice(0, 5).map((action) => html`
           <div class="outline-item clickable" title="Click to run action" @click=${emitAction(action)}>
             <span>${iconForAction(action)}</span>
             <span style="margin-left:6px;">${action.text}</span>
           </div>
         `) : ''}
 
-        ${this.hasCompletedRecording && data.followUps?.length ? html`
-          <insights-title>Questions to Consider</insights-title>
-          ${data.followUps.map((followUp) => html`<div class="request-item">${followUp}</div>`)}
-        ` : ''}
       </div>
     `;
   }

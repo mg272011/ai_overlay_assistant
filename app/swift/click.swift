@@ -1,6 +1,34 @@
 import ApplicationServices
 import Cocoa
 
+// Helper function to get position
+func getPosition(from element: AXUIElement) -> CGPoint? {
+  var value: CFTypeRef?
+  let result = AXUIElementCopyAttributeValue(element, "AXPosition" as CFString, &value)
+
+  if result == .success, let axValue = value {
+    var point = CGPoint.zero
+    if AXValueGetValue(axValue as! AXValue, .cgPoint, &point) {
+      return point
+    }
+  }
+  return nil
+}
+
+// Helper function to get size
+func getSize(from element: AXUIElement) -> CGSize? {
+  var value: CFTypeRef?
+  let result = AXUIElementCopyAttributeValue(element, "AXSize" as CFString, &value)
+
+  if result == .success, let axValue = value {
+    var size = CGSize.zero
+    if AXValueGetValue(axValue as! AXValue, .cgSize, &size) {
+      return size
+    }
+  }
+  return nil
+}
+
 var verbose = CommandLine.arguments.contains("--verbose") || CommandLine.arguments.contains("-v")
 
 let filteredArgs = CommandLine.arguments.filter { $0 != "--verbose" && $0 != "-v" }
@@ -29,7 +57,9 @@ let axAttributes = [
   kAXDescriptionAttribute,
   kAXSubroleAttribute,
   kAXRoleDescriptionAttribute,
-  kAXPlaceholderValueAttribute
+  kAXPlaceholderValueAttribute,
+  kAXPositionAttribute,
+  kAXSizeAttribute
 ]
 
 func isClickableRole(_ role: String) -> Bool {
@@ -46,6 +76,7 @@ func isClickableRole(_ role: String) -> Bool {
     "AXCell",
     "AXSearchField",
     "AXLink",
+    "AXImage",  // Added to capture images
     // "AXStaticText",
   ]
   if verbose { print("Checking if role is clickable: \(role)") }
@@ -60,6 +91,38 @@ func elementToDictFlat(
   var isGroup = false
   var roleStr = ""
   for attr in attrs {
+    // Special handling for coordinates so we output parseable strings
+    if attr == kAXPositionAttribute {
+      if let pos = getPosition(from: element) {
+        let posStr = "x=\(pos.x) y=\(pos.y)"
+        dict[attr as String] = posStr
+        if verbose {
+          print("[elementToDictFlat] path=\(path) attr=AXPosition value=\(posStr) err=0")
+        }
+      } else {
+        dict[attr as String] = ""
+        if verbose {
+          print("[elementToDictFlat] path=\(path) attr=AXPosition value= err=\(AXError.failure.rawValue)")
+        }
+      }
+      continue
+    }
+    if attr == kAXSizeAttribute {
+      if let sz = getSize(from: element) {
+        let sizeStr = "w=\(sz.width) h=\(sz.height)"
+        dict[attr as String] = sizeStr
+        if verbose {
+          print("[elementToDictFlat] path=\(path) attr=AXSize value=\(sizeStr) err=0")
+        }
+      } else {
+        dict[attr as String] = ""
+        if verbose {
+          print("[elementToDictFlat] path=\(path) attr=AXSize value= err=\(AXError.failure.rawValue)")
+        }
+      }
+      continue
+    }
+
     var value: CFTypeRef?
     let err = AXUIElementCopyAttributeValue(element, attr as CFString, &value)
     let str = (err == .success && value != nil) ? String(describing: value!) : ""
@@ -72,6 +135,22 @@ func elementToDictFlat(
       print("[elementToDictFlat] path=\(path) attr=\(attr) value=\(str) err=\(err.rawValue)")
     }
   }
+
+  // Check clickability
+  var isClickableElement = false
+  if isClickableRole(roleStr) {
+    isClickableElement = true
+  } else if roleStr == "AXStaticText" {
+    var actionsRef: CFArray?
+    if AXUIElementCopyActionNames(element, &actionsRef) == .success,
+      let actions = actionsRef as? [String]
+    {
+      if actions.contains("AXPress") {
+        isClickableElement = true
+      }
+    }
+  }
+  dict["clickable"] = isClickableElement
 
   // let mirror = Mirror(reflecting: element)
   // let properties = mirror.children
@@ -91,22 +170,26 @@ func elementToDictFlat(
     }
     for (i, c) in arr.enumerated() { elementToDictFlat(c, path: path + [i], flatList: &flatList) }
   }
+  // Include both clickable and informational elements for better context
   var shouldAdd = false
-  if isClickableRole(roleStr) {
+  
+  // Always include clickable elements
+  if isClickableElement {
     shouldAdd = true
-  } else if roleStr == "AXStaticText" {
-    var actionsRef: CFArray?
-    if AXUIElementCopyActionNames(element, &actionsRef) == .success,
-      let actions = actionsRef as? [String]
-    {
-      if actions.contains("AXPress") {
-        shouldAdd = true
-      }
-      if verbose {
-        print("[elementToDictFlat] path=\(path) AXStaticText actions=\(actions)")
-      }
+  }
+  // Also include some informational elements for context
+  else if ["AXStaticText", "AXHeading", "AXText"].contains(roleStr) {
+    // Include text elements that might provide context
+    let title = dict["AXTitle"] as? String ?? ""
+    let value = dict["AXValue"] as? String ?? ""
+    let description = dict["AXDescription"] as? String ?? ""
+    
+    // Only include if it has meaningful text
+    if !title.isEmpty || !value.isEmpty || !description.isEmpty {
+      shouldAdd = true
     }
   }
+  
   if !isGroup && shouldAdd {
     if verbose {
       print("[elementToDictFlat] Adding element at path=\(path) dict=\(dict)")
@@ -286,9 +369,25 @@ func clickElementById(bundleId: String, idStr: String) {
   }
   let el = elementAtPath(root: windowList[wIdx], path: Array(comps.dropFirst()))
   if let el = el {
+    // Get element coordinates before clicking
+    let position = getPosition(from: el)
+    let size = getSize(from: el)
+    
     if verbose {
       print("[clickElementById] Performing AXPress on element id=\(id) path=\(comps)")
     }
+    
+    // Log coordinates for every element click
+    if let pos = position, let sz = size {
+      let centerX = Int(pos.x + sz.width / 2)
+      let centerY = Int(pos.y + sz.height / 2)
+      print("[COORDINATES] 🖱️ Swift AX element click at coordinates: (\(centerX), \(centerY)) - element id: \(id)")
+    } else if let pos = position {
+      print("[COORDINATES] 🖱️ Swift AX element click at coordinates: (\(Int(pos.x)), \(Int(pos.y))) - element id: \(id)")
+    } else {
+      print("[COORDINATES] 🖱️ Swift AX element click - NO POSITION DATA for element id: \(id)")
+    }
+    
     AXUIElementPerformAction(el, kAXPressAction as CFString)
     print("Clicked element id \(id)")
   } else {

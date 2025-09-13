@@ -32,12 +32,17 @@ export class ListenView extends LitElement {
       width: 100%;
       height: auto;
       min-height: 120px; /* Much smaller minimum for adaptive sizing */
-      max-height: 420px; /* Slightly increased */
-      pointer-events: auto;
+      max-height: 500px; /* Increased from 420px to 500px for more content space */
+      pointer-events: none; /* Allow click-through for most of the container */
       border: 0.5px solid rgba(255, 255, 255, 0.3);
       backdrop-filter: blur(20px) saturate(180%) contrast(120%) brightness(110%) hue-rotate(5deg);
       -webkit-backdrop-filter: blur(20px) saturate(180%) contrast(120%) brightness(110%) hue-rotate(5deg);
       box-shadow: 0 8px 32px rgba(31, 38, 135, 0.15), 0 4px 16px rgba(255, 255, 255, 0.1) inset, inset 0 2px 0 rgba(255, 255, 255, 0.6), inset 0 -2px 0 rgba(255, 255, 255, 0.2), inset 0 0 20px 10px rgba(255, 255, 255, 0.08);
+      /* Ensure all corners are properly rounded */
+      border-top-left-radius: 12px;
+      border-top-right-radius: 12px;
+      border-bottom-left-radius: 12px;
+      border-bottom-right-radius: 12px;
     }
 
     .assistant-container::after {
@@ -221,6 +226,7 @@ export class ListenView extends LitElement {
     hasCompletedRecording: { type: Boolean },
     meetingResponse: { type: String },
     showResponse: { type: Boolean },
+    uploadedDocuments: { type: Array },
   };
 
   constructor() {
@@ -240,8 +246,10 @@ export class ListenView extends LitElement {
     this.meetingResponse = '';
     this.showResponse = false;
     this.responseTimeout = null;
+    this.uploadedDocuments = [];
 
     this.adjustWindowHeight = this.adjustWindowHeight.bind(this);
+    this.handleDocumentUpload = this.handleDocumentUpload.bind(this);
   }
 
   connectedCallback() {
@@ -271,7 +279,9 @@ export class ListenView extends LitElement {
     }
     
     // ✅ ADD MISSING EVENT LISTENER FOR MEETING ACTIONS
+    console.log('[ListenView] 🔗 Adding meeting-action-clicked event listener');
     this.addEventListener('meeting-action-clicked', this.handleMeetingActionClicked.bind(this));
+    console.log('[ListenView] 🔗 Event listener added successfully');
   }
 
   disconnectedCallback() {
@@ -281,7 +291,9 @@ export class ListenView extends LitElement {
     if (this.copyTimeout) { clearTimeout(this.copyTimeout); }
     
     // ✅ REMOVE EVENT LISTENER
+    console.log('[ListenView] 🔗 Removing meeting-action-clicked event listener');
     this.removeEventListener('meeting-action-clicked', this.handleMeetingActionClicked.bind(this));
+    console.log('[ListenView] 🔗 Event listener removed');
   }
 
   startTimer() {
@@ -365,13 +377,13 @@ export class ListenView extends LitElement {
     
     console.log('[ListenView] 🚀 Final action object:', JSON.stringify(action, null, 2));
     console.log('[ListenView] 🚀 About to send IPC...');
-    console.log('[ListenView] 🚀 electronAPI available?', !!window.electronAPI);
-    console.log('[ListenView] 🚀 electronAPI.send available?', !!window.electronAPI?.send);
+    console.log('[ListenView] 🚀 ipcRenderer available?', !!window.ipcRenderer);
+    console.log('[ListenView] 🚀 ipcRenderer.send available?', !!window.ipcRenderer?.send);
     
-    // Send IPC message to start meeting chat
-    if (window.electronAPI?.send) {
+    // FIXED: Use window.ipcRenderer.send instead of window.electronAPI.send
+    if (window.ipcRenderer?.send) {
       try {
-        window.electronAPI.send('start-meeting-chat', { chatId, action });
+        window.ipcRenderer.send('start-meeting-chat', { chatId, action });
         console.log('[ListenView] ✅ ✅ ✅ Successfully sent start-meeting-chat IPC message');
         console.log('[ListenView] ✅ Payload sent:', JSON.stringify({ chatId, action }, null, 2));
         
@@ -382,8 +394,9 @@ export class ListenView extends LitElement {
         console.error('[ListenView] ❌ Error sending IPC:', error);
       }
     } else {
-      console.error('[ListenView] ❌ electronAPI.send not available');
-      console.error('[ListenView] ❌ electronAPI object:', window.electronAPI);
+      console.error('[ListenView] ❌ ipcRenderer.send not available');
+      console.error('[ListenView] ❌ window.ipcRenderer object:', window.ipcRenderer);
+      console.error('[ListenView] ❌ window.electronAPI object:', window.electronAPI);
     }
   }
 
@@ -391,8 +404,9 @@ export class ListenView extends LitElement {
   setupMeetingChatListener(chatId) {
     console.log('[ListenView] 🎧 Setting up meeting chat listener for chatId:', chatId);
     
-    if (!window.electronAPI?.on) {
-      console.error('[ListenView] ❌ electronAPI.on not available for listening');
+    // FIXED: Use window.ipcRenderer.on instead of window.electronAPI.on
+    if (!window.ipcRenderer?.on) {
+      console.error('[ListenView] ❌ ipcRenderer.on not available for listening');
       return;
     }
     
@@ -402,7 +416,7 @@ export class ListenView extends LitElement {
     this.requestUpdate();
     
     // Listen for meeting chat stream events
-    const handleMeetingChatStream = (data) => {
+    const handleMeetingChatStream = (event, data) => { // Added event parameter
       console.log('[ListenView] 🎧 ===== RECEIVED MEETING CHAT STREAM =====');
       console.log('[ListenView] 🎧 Data received:', JSON.stringify(data, null, 2));
       console.log('[ListenView] 🎧 Expected chatId:', chatId);
@@ -415,13 +429,13 @@ export class ListenView extends LitElement {
         console.log('[ListenView] 🎧 ✅ Chat ID matches, processing...');
         
         if (data.type === 'text') {
-          console.log('[ListenView] 🎧 📝 Received text chunk:', data.content);
+          // Accumulating response text chunk
           // Accumulate chunks
           this.showMeetingResponse(data.content);
         } else if (data.type === 'stream_end') {
           console.log('[ListenView] 🎧 🏁 Stream ended');
-          // Clean up the listener
-          window.electronAPI.removeListener('meeting-chat-stream', handleMeetingChatStream);
+          // Clean up the listener - FIXED: Use removeListener instead of removeAllListeners
+          window.ipcRenderer.removeListener('meeting-chat-stream', handleMeetingChatStream);
           
           // Hide response after 10 seconds
           if (this.responseTimeout) clearTimeout(this.responseTimeout);
@@ -436,8 +450,8 @@ export class ListenView extends LitElement {
       }
     };
     
-    // Add the listener
-    window.electronAPI.on('meeting-chat-stream', handleMeetingChatStream);
+    // Add the listener - FIXED: Use window.ipcRenderer.on
+    window.ipcRenderer.on('meeting-chat-stream', handleMeetingChatStream);
     console.log('[ListenView] 🎧 ✅ Meeting chat listener set up successfully');
   }
   
@@ -451,18 +465,103 @@ export class ListenView extends LitElement {
     console.log('[ListenView] 📱 Total response so far:', this.meetingResponse);
   }
 
+  handleDocumentUpload(event) {
+    const files = event.target.files;
+    if (files) {
+      Array.from(files).forEach(file => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          const document = {
+            name: file.name,
+            content: e.target.result,
+            type: file.type,
+            uploadedAt: new Date().toISOString()
+          };
+          
+          this.uploadedDocuments = [...this.uploadedDocuments, document];
+          console.log('[ListenView] 📄 Document uploaded:', file.name);
+          
+          // Store document context globally for meeting use
+          window.meetingDocuments = this.uploadedDocuments;
+          
+          // Notify main process of new document context
+          if (window.ipcRenderer?.send) {
+            window.ipcRenderer.send('meeting-document-uploaded', document);
+          }
+          
+          this.requestUpdate();
+        };
+        
+        if (file.type.includes('text') || file.name.endsWith('.md') || file.name.endsWith('.txt')) {
+          reader.readAsText(file);
+        } else {
+          reader.readAsDataURL(file);
+        }
+      });
+    }
+    
+    // Clear file input
+    event.target.value = '';
+  }
+
+  removeDocument(index) {
+    this.uploadedDocuments = this.uploadedDocuments.filter((_, i) => i !== index);
+    window.meetingDocuments = this.uploadedDocuments;
+    this.requestUpdate();
+  }
+
   updated(changedProps) { super.updated(changedProps); if (changedProps.has('viewMode')) this.adjustWindowHeight(); }
   handleSttMessagesUpdated() { this.adjustWindowHeightThrottled(); }
   firstUpdated() { super.firstUpdated(); setTimeout(() => this.adjustWindowHeight(), 200); }
 
   render() {
-    const displayText = this.isHovering ? (this.viewMode === 'transcript' ? 'Copy Transcript' : 'Copy Glass Analysis') : (this.viewMode === 'insights' ? 'Live insights' : `Listening... ${this.elapsedTime}`);
+    const displayText = this.isHovering ? (this.viewMode === 'transcript' ? 'Copy Transcript' : 'Copy Neatly Insights') : (this.viewMode === 'insights' ? 'Live insights' : `Listening... ${this.elapsedTime}`);
     return html`
       <div class="assistant-container" style="max-width: 440px;">
         <div class="top-bar">
-          <div class="bar-left-text"><span class="bar-left-text-content ${this.isAnimating ? 'slide-in' : ''}">${displayText}</span></div>
+          <div class="bar-left-text"><span style="display:inline-block;width:14px;height:14px;margin-right:6px;opacity:0.9;vertical-align:-2px;">
+            <!-- TODO: replace with Neatly logo asset -->
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 17l6-10 6 10"/><path d="M12 14v7"/></svg>
+          </span><span class="bar-left-text-content ${this.isAnimating ? 'slide-in' : ''}">${displayText}</span></div>
           <div class="bar-controls">
-            <button class="toggle-button" @click=${this.toggleViewMode}>
+            <!-- Document upload button -->
+            <input type="file" id="document-upload" accept=".pdf,.doc,.docx,.txt,.md,.ppt,.pptx" multiple @change=${this.handleDocumentUpload} style="display: none;" />
+            <button 
+              class="toggle-button" 
+              @click=${() => this.shadowRoot.getElementById('document-upload').click()}
+              @mouseenter=${() => {
+                if (window.ipcRenderer?.send) {
+                  window.ipcRenderer.send('mouse:enter-interactive');
+                }
+              }}
+              @mouseleave=${() => {
+                if (window.ipcRenderer?.send) {
+                  window.ipcRenderer.send('mouse:leave-interactive');
+                }
+              }}
+              title="Upload docs to help with meeting context (resume, agenda, notes, etc.)"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                <polyline points="7,10 12,15 17,10"/>
+                <line x1="12" y1="15" x2="12" y2="3"/>
+              </svg>
+            </button>
+            
+            <button 
+              class="toggle-button" 
+              @click=${this.toggleViewMode}
+              @mouseenter=${() => {
+                if (window.ipcRenderer?.send) {
+                  window.ipcRenderer.send('mouse:enter-interactive');
+                }
+              }}
+              @mouseleave=${() => {
+                if (window.ipcRenderer?.send) {
+                  window.ipcRenderer.send('mouse:leave-interactive');
+                }
+              }}
+            >
               ${this.viewMode === 'insights' ? html`
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>
                 <span>Show Transcript</span>` : html`
@@ -475,6 +574,27 @@ export class ListenView extends LitElement {
             </button>
           </div>
         </div>
+        
+        <!-- Document previews -->
+        ${this.uploadedDocuments.length > 0 ? html`
+          <div style="padding: 8px 12px; border-bottom: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.05);">
+            <div style="font-size: 10px; color: rgba(255,255,255,0.7); margin-bottom: 4px;">Meeting Context:</div>
+            <div style="display: flex; flex-wrap: wrap; gap: 4px;">
+              ${this.uploadedDocuments.map((doc, index) => html`
+                <div style="display: flex; align-items: center; background: rgba(255,255,255,0.1); padding: 2px 6px; border-radius: 4px; font-size: 10px;">
+                  <span style="margin-right: 4px;">📄</span>
+                  <span style="max-width: 80px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${doc.name}</span>
+                  <button 
+                    @click=${() => this.removeDocument(index)}
+                    style="margin-left: 4px; background: none; border: none; color: rgba(255,255,255,0.7); cursor: pointer; padding: 0; font-size: 10px;"
+                    title="Remove document"
+                  >×</button>
+                </div>
+              `)}
+            </div>
+          </div>
+        ` : ''}
+        
         ${this.showResponse && this.meetingResponse ? html`
           <div class="response-overlay">
             ${this.meetingResponse}

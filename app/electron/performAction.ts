@@ -3,6 +3,8 @@ import runBashScript from "./tools/bash";
 import click from "./tools/click";
 import key from "./tools/key";
 import { openUri } from "./tools/uri";
+import { searchOnBrowser } from "./tools/search";
+import { hoverAt, rightClickAt, middleClickAt, doubleClickAt, dragAndDrop, scrollAt } from "./tools/mouse";
 import { ActionResult, Element } from "./types";
 import { logWithElapsed } from "./utils/utils";
 
@@ -62,6 +64,11 @@ export async function performAction(
       return res as any;
     }
 
+    case "=Search": {
+      const res = await searchOnBrowser(body.trim());
+      return res as any;
+    }
+
     case "=Bash": {
       const res = await runBashScript(body);
       return res as any;
@@ -75,6 +82,57 @@ export async function performAction(
     case "=Click": {
       const res = await click(body.trim(), clickableElements, bundleId);
       return res as any;
+    }
+
+    // New mouse primitives
+    case "=Hover": {
+      const [xStr, yStr, durStr] = body.trim().split(/\s+/);
+      const x = Number(xStr), y = Number(yStr), dur = Number(durStr || '200');
+      console.log(`[COORDINATES] 🎯 Hover at coordinates: (${x}, ${y}) duration: ${dur}ms`);
+      await hoverAt(x, y, dur);
+      return { type: "cursor-move", x, y } as any;
+    }
+    case "=RightClick": {
+      const [xStr, yStr] = body.trim().split(/\s+/);
+      const x = Number(xStr), y = Number(yStr);
+      console.log(`[COORDINATES] 🖱️ Right click at coordinates: (${x}, ${y})`);
+      await rightClickAt(x, y);
+      return { type: "cursor-click", x, y } as any;
+    }
+    case "=MiddleClick": {
+      const [xStr, yStr] = body.trim().split(/\s+/);
+      const x = Number(xStr), y = Number(yStr);
+      console.log(`[COORDINATES] 🖱️ Middle click at coordinates: (${x}, ${y})`);
+      await middleClickAt(x, y);
+      return { type: "cursor-click", x, y } as any;
+    }
+    case "=DoubleClick": {
+      const [xStr, yStr] = body.trim().split(/\s+/);
+      const x = Number(xStr), y = Number(yStr);
+      console.log(`[COORDINATES] 🖱️ Double click at coordinates: (${x}, ${y})`);
+      await doubleClickAt(x, y);
+      return { type: "cursor-click", x, y } as any;
+    }
+    case "=Scroll": {
+      const [xStr, yStr, dxStr, dyStr] = body.trim().split(/\s+/);
+      const x = Number(xStr), y = Number(yStr), dx = Number(dxStr || '0'), dy = Number(dyStr || '-120');
+      console.log(`[COORDINATES] 🔄 Scroll at coordinates: (${x}, ${y}) delta: (${dx}, ${dy})`);
+      await scrollAt(x, y, dx, dy);
+      return { type: "cursor-scroll", x, y } as any;
+    }
+    case "=DragDrop": {
+      const [sx, sy, ex, ey, dur] = body.trim().split(/\s+/);
+      const startX = Number(sx), startY = Number(sy), endX = Number(ex), endY = Number(ey), duration = Number(dur || '200');
+      console.log(`[COORDINATES] ↔️ Drag from coordinates: (${startX}, ${startY}) to (${endX}, ${endY}) duration: ${duration}ms`);
+      await dragAndDrop(startX, startY, endX, endY, duration);
+      return { type: "cursor-drag-end", x: endX, y: endY } as any;
+    }
+
+    // Clipboard
+    case "=ClipboardWrite": {
+      // Body can be JSON with { text?, html?, imageBase64? }
+      // This action should be invoked from renderer via preload clipboard API; no-op here
+      return { type: "unknown tool" } as any;
     }
 
     default: {

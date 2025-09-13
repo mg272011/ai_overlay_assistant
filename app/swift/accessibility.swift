@@ -148,7 +148,7 @@ func scanElement(_ element: AXUIElement, depth: Int = 0) -> [ClickableElementInt
 
 let showOutput =
   CommandLine.arguments.count < 2
-  || (CommandLine.arguments[1] != "json-list" && CommandLine.arguments[1] != "click")
+  || (CommandLine.arguments[1] != "json-list" && CommandLine.arguments[1] != "click" && CommandLine.arguments[1] != "--check-only")
 
 if showOutput {
   print("Accessibility Scanner")
@@ -167,6 +167,12 @@ if !trusted {
   print("Go to: System Preferences > Security & Privacy > Privacy > Accessibility")
   print("Add your terminal or application and make sure it's checked.")
   exit(1)
+}
+
+// Check if this is just a permissions check
+if CommandLine.arguments.count > 1 && CommandLine.arguments[1] == "--check-only" {
+  print("✅ Accessibility permissions are enabled.")
+  exit(0)
 }
 
 // Get frontmost application

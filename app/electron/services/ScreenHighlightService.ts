@@ -13,6 +13,9 @@ export class ScreenHighlightService {
     try {
       console.log('[ScreenHighlight] Starting simple screen selection');
       
+      // Clean up any existing overlay window first
+      this.cleanup();
+      
       // Create simple transparent overlay for selection - no screenshots needed!
       await this.createSimpleSelectionOverlay();
       
@@ -25,6 +28,22 @@ export class ScreenHighlightService {
 
 
   private async createSimpleSelectionOverlay(): Promise<void> {
+    // Aggressive cleanup before creating new window
+    if (this.highlightWindow && !this.highlightWindow.isDestroyed()) {
+      console.log('[ScreenHighlight] Closing existing highlight window');
+      this.highlightWindow.close();
+      this.highlightWindow = null;
+    }
+    
+    // Also close any orphaned windows that might match our pattern
+    const allWindows = BrowserWindow.getAllWindows();
+    allWindows.forEach(window => {
+      if (window.getTitle() === 'Screen Highlight' && !window.isDestroyed()) {
+        console.log('[ScreenHighlight] Closing orphaned highlight window');
+        window.close();
+      }
+    });
+    
     const primaryDisplay = screen.getPrimaryDisplay();
     const { width, height, x, y } = primaryDisplay.bounds;
     
@@ -36,6 +55,7 @@ export class ScreenHighlightService {
       height,
       x,
       y,
+      title: 'Screen Highlight', // Add title for identification
       frame: false,
       transparent: true,
       alwaysOnTop: true,
@@ -51,6 +71,10 @@ export class ScreenHighlightService {
 
     // Make window interactive so it can receive mouse events for selection
     this.highlightWindow.setIgnoreMouseEvents(false);
+    try { (this.highlightWindow as any).setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true }); } catch {}
+    try { this.highlightWindow.setAlwaysOnTop(true, 'screen-saver' as any); } catch {}
+    try { this.highlightWindow.setFullScreenable(false); } catch {}
+    try { this.highlightWindow.focus(); } catch {}
 
     // Create simple selection HTML
     const selectionHTML = this.createSimpleSelectionHTML();
@@ -102,102 +126,118 @@ export class ScreenHighlightService {
           z-index: 20;
         }
         
-        #instructions {
+        #ui-container {
           position: fixed;
-          top: 110px;
-          left: 50%;
-          transform: translateX(-50%);
-          background: rgba(0, 0, 0, 0.9);
-          color: white;
-          padding: 12px 24px;
-          border-radius: 12px;
-          font-family: -apple-system, BlinkMacSystemFont, sans-serif;
-          font-size: 16px;
-          font-weight: 500;
-          z-index: 1000;
-          box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
-          pointer-events: auto; /* Make instructions clickable */
-        }
-        
-        #controls {
-          position: fixed;
-          top: 160px;
+          top: 50px;
           left: 50%;
           transform: translateX(-50%);
           display: flex;
           flex-direction: row;
-          gap: 12px;
+          align-items: center;
+          gap: 16px;
           z-index: 1000;
+          pointer-events: auto;
+        }
+        
+        #instructions {
+          background: rgba(0, 0, 0, 0.3);
+          backdrop-filter: blur(20px) saturate(180%) contrast(120%) brightness(110%) hue-rotate(5deg);
+          border: 0.5px solid rgba(255, 255, 255, 0.3);
+          color: white;
+          padding: 8px 16px;
+          border-radius: 8px;
+          font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+          font-size: 14px;
+          font-weight: 500;
+          box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+          pointer-events: auto; /* Make instructions clickable */
+          white-space: nowrap;
+        }
+        
+        #controls {
+          display: flex;
+          flex-direction: row;
+          gap: 8px;
           pointer-events: auto; /* Make controls clickable */
         }
         
         .control-btn {
-          background: rgba(0, 0, 0, 0.9);
+          background: rgba(0, 0, 0, 0.3);
+          backdrop-filter: blur(20px) saturate(180%) contrast(120%) brightness(110%) hue-rotate(5deg);
+          border: 0.5px solid rgba(255, 255, 255, 0.3);
           color: white;
-          border: none;
-          padding: 14px 20px;
-          border-radius: 10px;
+          padding: 10px 16px;
+          border-radius: 8px;
           font-family: -apple-system, BlinkMacSystemFont, sans-serif;
-          font-size: 14px;
+          font-size: 13px;
           font-weight: 500;
           cursor: pointer;
           transition: all 0.2s;
-          min-width: 140px;
+          min-width: 100px;
           box-shadow: 0 2px 12px rgba(0, 0, 0, 0.3);
         }
         
         .control-btn:hover {
-          background: rgba(0, 0, 0, 1);
+          background: rgba(0, 0, 0, 0.5);
           transform: translateY(-1px);
         }
         
         .control-btn.primary {
-          background: #007AFF;
+          background: rgba(0, 122, 255, 0.4);
+          backdrop-filter: blur(20px) saturate(180%) contrast(120%) brightness(110%) hue-rotate(5deg);
+          border: 0.5px solid rgba(0, 122, 255, 0.5);
         }
         
         .control-btn.primary:hover {
-          background: #0056CC;
+          background: rgba(0, 86, 204, 0.6);
         }
       </style>
     </head>
     <body>
       <div id="selection"></div>
-      
-      <div id="instructions">
-        📸 Drag to select area • ESC to cancel
+      <div id="ui-container">
+        <div id="instructions">Drag to select area • ESC to cancel</div>
+        <div id="controls">
+          <button id="captureBtn" class="control-btn primary" style="display: none;">Capture</button>
+          <button id="cancelBtn" class="control-btn">Cancel</button>
+        </div>
       </div>
       
-      <div id="controls">
-        <button class="control-btn" onclick="cancelHighlight()">❌ Cancel</button>
-        <button class="control-btn primary" onclick="captureSelection()" id="captureBtn" style="display:none;">✨ Capture</button>
-      </div>
+ 
+       
+ 
+ 
+       <script>
+         const { ipcRenderer } = require('electron');
+         
+         let isSelecting = false;
+         let startX, startY, endX, endY;
+         const selection = document.getElementById('selection');
+         const captureBtn = document.getElementById('captureBtn');
+         const instructions = document.getElementById('instructions');
+         const cancelBtn = document.getElementById('cancelBtn');
 
-      <script>
-        const { ipcRenderer } = require('electron');
-        
-        let isSelecting = false;
-        let startX, startY, endX, endY;
-        const selection = document.getElementById('selection');
-        const captureBtn = document.getElementById('captureBtn');
-        const instructions = document.getElementById('instructions');
-        
-        // Start selection
-        document.addEventListener('mousedown', (e) => {
-          // Don't start selection if clicking on control buttons
-          if (e.target.closest('#controls')) return;
-          
-          console.log('[Selection] Mouse down at:', e.clientX, e.clientY);
-          isSelecting = true;
-          startX = e.clientX;
-          startY = e.clientY;
-          selection.style.left = startX + 'px';
-          selection.style.top = startY + 'px';
-          selection.style.width = '0px';
-          selection.style.height = '0px';
-          selection.style.display = 'block';
-          instructions.textContent = '🎯 Drag to select area...';
-          captureBtn.style.display = 'none'; // Hide capture button when starting new selection
-        });
+         // Wire buttons
+         if (captureBtn) captureBtn.addEventListener('click', () => captureSelection());
+         if (cancelBtn) cancelBtn.addEventListener('click', () => cancelHighlight());
+         
+         // Start selection
+         document.addEventListener('mousedown', (e) => {
+           // Don't start selection if clicking on control buttons
+           if (e.target.closest('#controls')) return;
+           
+           console.log('[Selection] Mouse down at:', e.clientX, e.clientY);
+           isSelecting = true;
+           startX = e.clientX;
+           startY = e.clientY;
+           selection.style.left = startX + 'px';
+           selection.style.top = startY + 'px';
+           selection.style.width = '0px';
+           selection.style.height = '0px';
+           selection.style.display = 'block';
+           instructions.textContent = 'Drag to select area...';
+           captureBtn.style.display = 'none'; // Hide capture button when starting new selection
+         });
         
         // Update selection
         document.addEventListener('mousemove', (e) => {
@@ -218,7 +258,7 @@ export class ScreenHighlightService {
           
           // Show real-time size feedback
           if (width > 10 && height > 10) {
-            instructions.textContent = \`🎯 Size: \${width}x\${height}px - Keep dragging...\`;
+            instructions.textContent = \`Size: \${width}x\${height}px - Keep dragging...\`;
           }
         });
         
@@ -242,16 +282,16 @@ export class ScreenHighlightService {
           
           if (width >= 30 && height >= 30) {
             captureBtn.style.display = 'block';
-            instructions.textContent = \`✅ Perfect! \${width}x\${height}px - Click Capture\`;
+            instructions.textContent = \`Perfect! \${width}x\${height}px - Click Capture\`;
           } else if (width < 10 && height < 10) {
             // Small click - just reset
             selection.style.display = 'none';
-            instructions.textContent = '📸 Drag to select area • ESC to cancel';
+            instructions.textContent = 'Drag to select area • ESC to cancel';
           } else {
-            instructions.textContent = \`⚠️ Too small: \${width}x\${height}px (need 30x30 minimum)\`;
+            instructions.textContent = \`Too small: \${width}x\${height}px (need 30x30 minimum)\`;
             selection.style.display = 'none';
             setTimeout(() => {
-              instructions.textContent = '📸 Drag to select area • ESC to cancel';
+              instructions.textContent = 'Drag to select area • ESC to cancel';
             }, 2000);
           }
         });
@@ -312,16 +352,38 @@ export class ScreenHighlightService {
 
 
   cleanup(): void {
+    console.log('[ScreenHighlight] Starting cleanup...');
+    
+    // Close our tracked window
     if (this.highlightWindow && !this.highlightWindow.isDestroyed()) {
+      console.log('[ScreenHighlight] Closing tracked highlight window');
       this.highlightWindow.close();
     }
     this.highlightWindow = null;
+    
+    // Also force close any orphaned highlight windows
+    const allWindows = BrowserWindow.getAllWindows();
+    let closedCount = 0;
+    allWindows.forEach(window => {
+      if (!window.isDestroyed() && window.getTitle() === 'Screen Highlight') {
+        console.log('[ScreenHighlight] Force closing orphaned highlight window');
+        window.close();
+        closedCount++;
+      }
+    });
+    
+    console.log('[ScreenHighlight] Cleanup complete. Closed', closedCount, 'orphaned windows');
   }
 }
 
 let screenHighlightService: ScreenHighlightService | null = null;
 
 export function initScreenHighlightService(mainWindow: BrowserWindow): void {
+  // Clean up existing service if it exists
+  if (screenHighlightService) {
+    screenHighlightService.cleanup();
+  }
+  // Create new service instance
   screenHighlightService = new ScreenHighlightService(mainWindow);
 }
 

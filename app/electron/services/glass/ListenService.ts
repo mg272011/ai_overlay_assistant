@@ -27,7 +27,7 @@ export class ListenService {
     this.sttService = new SttService();
     this.summaryService = new SummaryService();
     this.setupServiceCallbacks();
-    console.log('[Glass-ListenService] Service instance created.');
+    console.log('[Neatly-ListenService] Service instance created.');
   }
 
   setMainWindow(window: BrowserWindow) {
@@ -49,7 +49,7 @@ export class ListenService {
     // Summary service callbacks
     this.summaryService.setCallbacks({
       onAnalysisComplete: (data: any) => {
-        console.log('📊 Glass Analysis completed:', data);
+        console.log('📊 Neatly Analysis completed:', data);
         this.sendToRenderer('glass-analysis-complete', data);
       },
       onStatusUpdate: (status: string) => {
@@ -66,7 +66,7 @@ export class ListenService {
 
   async startListening(): Promise<void> {
     try {
-      console.log('[Glass-ListenService] Starting listening session...');
+      console.log('[Neatly-ListenService] Starting listening session...');
       
       // Initialize new session
       await this.initializeNewSession();
@@ -77,7 +77,7 @@ export class ListenService {
       // Notify renderer
       this.sendToRenderer('glass-session-state-changed', { isActive: true });
       
-      console.log('[Glass-ListenService] Listening session started successfully');
+      console.log('[Neatly-ListenService] Listening session started successfully');
     } catch (error) {
       console.error('[Glass-ListenService] Error starting listening:', error);
       throw error;
@@ -86,7 +86,7 @@ export class ListenService {
 
   async stopListening(): Promise<void> {
     try {
-      console.log('[Glass-ListenService] Stopping listening session...');
+      console.log('[Neatly-ListenService] Stopping listening session...');
       
       // Stop STT service
       await this.sttService.stopListening();
@@ -106,15 +106,15 @@ export class ListenService {
       // Notify renderer
       this.sendToRenderer('glass-session-state-changed', { isActive: false });
       
-      console.log('[Glass-ListenService] Listening session stopped');
+      console.log('[Neatly-ListenService] Listening session stopped');
     } catch (error) {
-      console.error('[Glass-ListenService] Error stopping listening:', error);
+      console.error('[Neatly-ListenService] Error stopping listening:', error);
       throw error;
     }
   }
 
   private async handleTranscriptionComplete(speaker: string, text: string) {
-    console.log(`[Glass-ListenService] Transcription: ${speaker} - ${text}`);
+    console.log(`[Neatly-ListenService] Transcription: ${speaker} - ${text}`);
     
     // Save to session
     if (this.currentSession) {

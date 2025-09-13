@@ -9,12 +9,13 @@ export class SttView extends LitElement {
 
     .transcription-container {
       overflow-y: auto;
+      overflow-x: hidden;
       padding: 12px 12px 16px 12px;
       display: flex;
       flex-direction: column;
       gap: 4px;
       min-height: 150px;
-      max-height: 560px;
+      max-height: 400px; /* Reduced from 560px to 400px for better fitting */
       position: relative;
       z-index: 1;
       flex: 1;
@@ -23,6 +24,10 @@ export class SttView extends LitElement {
       color: rgba(255,255,255,0.95);
       white-space: pre-wrap;
       word-break: break-word;
+      /* Ensure rounded corners are preserved when scrolling */
+      border-radius: 0 0 12px 12px;
+      -webkit-mask-image: radial-gradient(white, black);
+      pointer-events: auto; /* Keep transcript scrollable */
     }
 
     .transcription-container::-webkit-scrollbar { width: 8px; }
@@ -96,7 +101,8 @@ export class SttView extends LitElement {
   handleSttUpdate(_event, { speaker, text, isFinal, isPartial }) {
     if (text === undefined) return;
     const container = this.shadowRoot?.querySelector('.transcription-container');
-    this._shouldScrollAfterUpdate = container ? (container.scrollTop + container.clientHeight >= container.scrollHeight - 10) : false;
+    // Always scroll when new content arrives (unless user is actively scrolling)
+    this._shouldScrollAfterUpdate = !this._isUserScrolling;
 
     const findLastPartialIdx = (spk) => {
       for (let i = this.sttMessages.length - 1; i >= 0; i--) {

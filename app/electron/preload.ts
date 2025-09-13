@@ -60,6 +60,16 @@ contextBridge.exposeInMainWorld("ipcRenderer", {
   // Custom APIs for renderer
   enableLoopback: () => ipcRenderer.invoke("enable-loopback-audio"),
   disableLoopback: () => ipcRenderer.invoke("disable-loopback-audio"),
+
+  // Clipboard APIs
+  clipboard: {
+    write: (payload: { text?: string; html?: string; imageBase64?: string }) => ipcRenderer.invoke('clipboard-write', payload),
+    readText: () => ipcRenderer.invoke('clipboard-read-text'),
+    readHTML: () => ipcRenderer.invoke('clipboard-read-html'),
+    readImageBase64: () => ipcRenderer.invoke('clipboard-read-image-base64'),
+    copyScreenArea: (selection: { x: number; y: number; width: number; height: number }) => ipcRenderer.send('copy-screen-area-to-clipboard', selection),
+    pasteImageFromClipboard: () => ipcRenderer.send('paste-image-from-clipboard'),
+  },
 });
 
 // Bridge for Glass-like web components (no glass dependency)

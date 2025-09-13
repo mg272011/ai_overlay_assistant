@@ -3,7 +3,7 @@
   "$schema": "https://raw.githubusercontent.com/electron-userland/electron-builder/master/packages/app-builder-lib/scheme.json",
   "appId": "com.opus.app",
   "asar": true,
-  "productName": "Opus",
+  "productName": "Neatly",
   "directories": {
     "output": "release/${version}"
   },
